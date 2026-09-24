@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'none'"
+    >
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <title>infmu | endless music from a seed</title>
+    <meta name="description"
+      content="Endless music composed and synthesized in your browser from a seed. Share the seed and anyone hears the same song.">
+    <meta name="theme-color" content="#16131f">
+    <meta name="color-scheme" content="dark">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="infmu: endless music from a seed">
+    <meta property="og:description"
+      content="Composed and synthesized in your browser, sample by sample. No audio files. Same seed, same song, forever.">
+    <meta property="og:url" content="https://jd1378.github.io/infmu/">
+    <meta property="og:image" content="https://jd1378.github.io/infmu/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt"
+      content="The infmu player: a seed phrase, the movement playing, and a circle of fifths lit by the chord and notes.">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%23c7b6ff' stroke-width='5'/%3E%3Cpath d='M32 14 47 40H17Z' fill='%23c7b6ff'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..700&family=Hanken+Grotesk:wght@400;500;600&display=swap">
+    <style>
+    :root {
+      /* hue and colour strength follow the music's key: see ui/theme.ts */
+      --h: 285;
+      --c: 0.12;
+      --l: 0.8;
+      --bg: oklch(0.155 0.03 var(--h));
+      --bg-2: oklch(0.2 0.035 var(--h));
+      --bg-3: oklch(0.26 0.04 var(--h));
+      --ink: oklch(0.95 0.012 var(--h));
+      --ink-2: oklch(0.74 0.03 var(--h));
+      --ink-3: oklch(0.62 0.035 var(--h));
+      --line: oklch(0.34 0.035 var(--h));
+      --accent: oklch(var(--l) var(--c) var(--h));
+      --accent-ink: oklch(0.18 0.04 var(--h));
+      --serif: 'Bodoni Moda', 'Didot', 'Bodoni 72', Georgia, serif;
+      --sans: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --bar-h: 104px;
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html {
+      background: var(--bg);
+      transition: background-color 2.5s ease;
+    }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      color: var(--ink);
+      background: var(--bg);
+      font: 400 16px/1.5 var(--sans);
+      font-variant-numeric: tabular-nums;
+      transition: background-color 2.5s ease, color 2.5s ease;
+      -webkit-font-smoothing: antialiased;
+    }
+    button,
+    input {
+      font: inherit;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+    }
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    a {
+      color: var(--ink-2);
+      text-underline-offset: 3px;
+    }
+    a:hover {
+      color: var(--ink);
+    }
+    .sr {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    /* ------------------------------------------------------------ top */
+    header.top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px clamp(16px, 4vw, 48px) 0;
+    }
+    .wordmark {
+      font: italic 600 26px/1 var(--serif);
+      letter-spacing: 0.01em;
+      margin: 0;
+    }
+    .wordmark span {
+      font: 400 14px/1 var(--sans);
+      font-style: normal;
+      color: var(--ink-3);
+      margin-left: 10px;
+      letter-spacing: 0;
+    }
+    .top nav {
+      display: flex;
+      gap: 18px;
+      font-size: 14px;
+    }
+    .linkish {
+      background: none;
+      border: 0;
+      padding: 0;
+      color: var(--ink-2);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .linkish:hover {
+      color: var(--ink);
+    }
+
+    /* ------------------------------------------------------------ stage */
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+      gap: clamp(24px, 4vw, 64px);
+      align-items: center;
+      padding: 24px clamp(16px, 4vw, 48px) calc(var(--bar-h) + 32px);
+      min-height: calc(100dvh - 48px);
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    .info {
+      min-width: 0;
+      max-width: 34rem;
+    }
+    .label {
+      font-size: 13px;
+      color: var(--ink-3);
+      margin: 0 0 4px;
+    }
+    .seed-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .seed {
+      font: 500 clamp(34px, 4.4vw, 60px)/1.02 var(--serif);
+      letter-spacing: -0.01em;
+      margin: 0;
+      overflow-wrap: anywhere;
+      hyphens: none;
+      max-width: 100%;
+    }
+    .seed-edit {
+      width: 100%;
+      font: 500 clamp(28px, 3.6vw, 48px)/1.1 var(--serif);
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 12px;
+      color: var(--ink);
+    }
+    .seed-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 16px 0 0;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: transparent;
+      font-size: 14px;
+      color: var(--ink-2);
+      transition: border-color .2s, color .2s, background-color .2s;
+    }
+    .chip:hover {
+      border-color: var(--ink-3);
+      color: var(--ink);
+    }
+    .chip svg {
+      width: 16px;
+      height: 16px;
+    }
+    .chip[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+    }
+
+    .movement {
+      margin: 40px 0 0;
+    }
+    .mv-title {
+      margin: 0;
+      font: italic 400 clamp(26px, 2.6vw, 36px)/1.15 var(--serif);
+    }
+    .mv-title .num {
+      font-style: normal;
+      font-weight: 600;
+      margin-right: 0.35em;
+      color: var(--accent);
+      transition: color 2.5s;
+    }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(4, auto);
+      justify-content: start;
+      column-gap: 28px;
+      row-gap: 2px;
+      margin: 18px 0 0;
+    }
+    .facts dt {
+      font-size: 13px;
+      color: var(--ink-3);
+      grid-row: 1;
+    }
+    .facts dd {
+      margin: 0;
+      font-size: 16px;
+      grid-row: 2;
+      white-space: nowrap;
+    }
+    .chords {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 22px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .chords li {
+      font: 500 15px/1 var(--sans);
+      padding: 7px 10px;
+      border-radius: 6px;
+      color: var(--ink-2);
+      background: var(--bg-2);
+      transition: background-color .25s, color .25s;
+    }
+    .chords li.on {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    .next {
+      margin: 26px 0 0;
+      font-size: 14px;
+      color: var(--ink-3);
+    }
+    .next b {
+      font-weight: 500;
+      color: var(--ink-2);
+    }
+
+    .stage {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-width: 0;
+    }
+    .dial {
+      width: min(100%, 72vh, 720px);
+      aspect-ratio: 1;
+      display: block;
+    }
+    .big-play {
+      position: absolute;
+      width: 92px;
+      height: 92px;
+      border-radius: 50%;
+      border: 0;
+      background: var(--accent);
+      color: var(--accent-ink);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 0 10px oklch(var(--l) var(--c) var(--h) / 0.14);
+      transition: transform .2s, opacity .4s;
+    }
+    .big-play:hover {
+      transform: scale(1.05);
+    }
+    .big-play svg {
+      width: 34px;
+      height: 34px;
+      margin-left: 4px;
+    }
+    .big-play[hidden] {
+      display: none;
+    }
+    .status {
+      position: absolute;
+      bottom: 4%;
+      font-size: 14px;
+      color: var(--ink-2);
+      text-align: center;
+    }
+
+    /* ------------------------------------------------------------ player bar */
+    .bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px 28px;
+      padding: 14px clamp(16px, 4vw, 48px) calc(14px + env(safe-area-inset-bottom));
+      background: oklch(0.155 0.03 var(--h) / 0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-top: 1px solid var(--line);
+      transition: background-color 2.5s;
+    }
+    .transport,
+    .extras {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .icon {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--ink-2);
+      transition: color .2s, background-color .2s;
+      position: relative;
+    }
+    .icon:hover {
+      color: var(--ink);
+      background: var(--bg-2);
+    }
+    .icon svg {
+      width: 22px;
+      height: 22px;
+    }
+    .icon[aria-pressed="true"] {
+      color: var(--accent);
+    }
+    .icon.play {
+      width: 52px;
+      height: 52px;
+      background: var(--ink);
+      color: var(--bg);
+    }
+    .icon.play:hover {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    .icon.play svg {
+      width: 24px;
+      height: 24px;
+    }
+    .icon .badge {
+      position: absolute;
+      right: 2px;
+      top: 2px;
+      min-width: 18px;
+      padding: 1px 4px;
+      border-radius: 9px;
+      font-size: 10px;
+      line-height: 14px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 600;
+    }
+    .timeline {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .time {
+      font-size: 13px;
+      color: var(--ink-2);
+      min-width: 3.2em;
+    }
+    .time.end {
+      text-align: right;
+    }
+    .track {
+      position: relative;
+      height: 34px;
+      cursor: pointer;
+      touch-action: none;
+    }
+    .segments {
+      position: absolute;
+      inset: 11px 0 11px 0;
+      display: flex;
+      gap: 3px;
+    }
+    .seg {
+      position: relative;
+      height: 100%;
+      border-radius: 3px;
+      background: var(--bg-3);
+    }
+    .seg .fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0;
+      border-radius: inherit;
+      background: var(--ink-2);
+    }
+    .seg.hot {
+      background: oklch(0.34 0.07 var(--h));
+    }
+    .seg.hot .fill {
+      background: var(--accent);
+    }
+    .seg-label {
+      position: absolute;
+      top: -12px;
+      left: 0;
+      font-size: 11px;
+      color: var(--ink-3);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .track:focus-visible {
+      outline-offset: 4px;
+    }
+    .vol {
+      width: 96px;
+      accent-color: var(--accent);
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(var(--bar-h) + 20px);
+      transform: translate(-50%, 8px);
+      opacity: 0;
+      background: var(--ink);
+      color: var(--bg);
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 10;
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+      max-width: calc(100vw - 32px);
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    /* ------------------------------------------------------------ dialogs */
+    dialog {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--bg-2);
+      color: var(--ink);
+      max-width: min(640px, calc(100vw - 32px));
+      padding: 28px 30px;
+      line-height: 1.6;
+    }
+    dialog::backdrop {
+      background: oklch(0.1 0.02 var(--h) / 0.7);
+      backdrop-filter: blur(3px);
+    }
+    dialog h2 {
+      font: italic 500 30px/1.1 var(--serif);
+      margin: 0 0 14px;
+    }
+    dialog h3 {
+      font: 600 16px/1.3 var(--sans);
+      margin: 22px 0 6px;
+    }
+    dialog p,
+    dialog li {
+      color: var(--ink-2);
+      font-size: 15px;
+    }
+    dialog p {
+      margin: 0 0 10px;
+    }
+    dialog ul {
+      padding-left: 20px;
+      margin: 0;
+    }
+    dialog .close {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+    }
+    .keys {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 16px;
+      margin: 0;
+    }
+    .keys dt {
+      font-weight: 600;
+    }
+    .keys dd {
+      margin: 0;
+      color: var(--ink-2);
+    }
+    kbd {
+      font: 600 13px/1 var(--sans);
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      background: var(--bg);
+    }
+    .styles-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 18px;
+    }
+    .primary {
+      height: 44px;
+      padding: 0 22px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--ink);
+      color: var(--bg);
+      font-weight: 600;
+      transition: background-color 0.2s;
+    }
+    .primary:hover {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    .recent {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .recent button {
+      font: 500 15px/1 var(--serif);
+    }
+
+    @media (max-width: 900px) {
+      :root {
+        --bar-h: 128px;
+      }
+      main {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+        padding-top: 8px;
+        gap: 8px;
+      }
+      .stage {
+        order: -1;
+      }
+      .dial {
+        width: min(100%, 52vh);
+      }
+      .movement {
+        margin-top: 28px;
+      }
+      .facts {
+        grid-template-columns: repeat(2, auto);
+        row-gap: 10px;
+      }
+      .facts dt {
+        grid-row: auto;
+      }
+      .facts dd {
+        grid-row: auto;
+      }
+      .bar {
+        grid-template-columns: 1fr auto;
+        grid-template-areas: "time time" "transport extras";
+        gap: 6px 12px;
+        padding-top: 8px;
+      }
+      .timeline {
+        grid-area: time;
+      }
+      .transport {
+        grid-area: transport;
+      }
+      .extras {
+        grid-area: extras;
+      }
+      .vol {
+        display: none;
+      }
+      .wordmark span {
+        display: none;
+      }
+    }
+    @media (max-width: 420px) {
+      .icon {
+        width: 38px;
+        height: 38px;
+      }
+      .extras {
+        gap: 0;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html,
+      body,
+      .mv-title .num,
+      .bar {
+        transition: none;
+      }
+    }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <p class="wordmark">infmu<span>endless music from a seed</span></p>
+      <nav>
+        <button class="linkish" type="button" data-open="about">How it works</button>
+        <a href="https://github.com/jd1378/infmu">Source</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="info" aria-label="Now playing">
+        <p class="label" id="seed-label">Seed</p>
+        <div class="seed-row">
+          <h1 class="seed" id="seed" aria-describedby="seed-label"></h1>
+        </div>
+        <div class="seed-actions">
+          <button class="chip" type="button" id="new-seed" title="New seed (D)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor"/></svg>
+        New seed
+      </button>
+          <button class="chip" type="button" data-open="seeds" title="Type a seed, pick styles">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
+        Choose seed
+      </button>
+          <button class="chip" type="button" id="share" title="Copy a link to this moment (S)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+        Copy link
+      </button>
+        </div>
+
+        <div class="movement">
+          <h2 class="mv-title" id="mv-title"><span class="num"></span><span class="name"></span></h2>
+          <dl class="facts">
+            <dt>Style</dt>
+            <dd id="f-style"></dd>
+            <dt>Key</dt>
+            <dd id="f-key"></dd>
+            <dt>Tempo</dt>
+            <dd id="f-tempo"></dd>
+            <dt>Section</dt>
+            <dd id="f-section"></dd>
+          </dl>
+          <ul class="chords" id="chords" aria-label="Chords in this section"></ul>
+          <p class="next" id="next"></p>
+        </div>
+      </section>
+
+      <section class="stage" aria-label="Visualizer">
+        <canvas class="dial" id="dial" role="img"
+          aria-label="Circle of fifths showing the chords and notes as they play"></canvas>
+        <button class="big-play" id="big-play" type="button" aria-label="Play">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M7 4.5v15l13-7.5z" />
+          </svg>
+        </button>
+        <p class="status" id="status" role="status"></p>
+      </section>
+    </main>
+
+    <div class="bar" role="region" aria-label="Player">
+      <div class="transport">
+        <button class="icon" type="button" id="prev" aria-label="Previous movement" title="Previous movement (P)">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M6 5h2v14H6zM20 5v14L9.5 12z" />
+          </svg>
+        </button>
+        <button class="icon play" type="button" id="play" aria-label="Play" title="Play or pause (Space)">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path class="glyph" d="M7 4.5v15l13-7.5z" />
+          </svg>
+        </button>
+        <button class="icon" type="button" id="next-btn" aria-label="Next movement" title="Next movement (N)">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M16 5h2v14h-2zM4 5v14l10.5-7z" />
+          </svg>
+        </button>
+      </div>
+      <div class="timeline">
+        <span class="time" id="t-now">0:00</span>
+        <div class="track" id="track" role="slider" tabindex="0" aria-label="Position in this movement"
+          aria-valuemin="0">
+          <div class="segments" id="segments"></div>
+        </div>
+        <span class="time end" id="t-end">0:00</span>
+      </div>
+      <div class="extras">
+        <button class="icon" type="button" id="repeat" aria-pressed="false" aria-label="Repeat this movement"
+          title="Repeat this movement (R)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 2l3 3-3 3" />
+            <path d="M4 11V9a4 4 0 0 1 4-4h12" />
+            <path d="M7 22l-3-3 3-3" />
+            <path d="M20 13v2a4 4 0 0 1-4 4H4" />
+            <text x="12" y="14.5" font-size="7" text-anchor="middle" fill="currentColor" stroke="none"
+              font-family="sans-serif" font-weight="700">1</text>
+          </svg>
+        </button>
+        <button class="icon" type="button" id="sleep" aria-label="Sleep timer: off" title="Sleep timer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            aria-hidden="true">
+            <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />
+          </svg>
+          <span class="badge" hidden></span>
+        </button>
+        <button class="icon" type="button" id="download" aria-label="Download this movement as WAV"
+          title="Download this movement (WAV)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 4v11" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M5 20h14" />
+          </svg>
+        </button>
+        <button class="icon" type="button" id="mute" aria-label="Mute" title="Mute (M)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" />
+            <path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" />
+          </svg>
+        </button>
+        <input class="vol" id="vol" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <dialog id="seeds" aria-labelledby="seeds-h">
+      <button class="icon close" type="button" data-close
+        aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <h2 id="seeds-h">Choose a seed</h2>
+      <form id="seed-form" method="dialog">
+        <p>Any words work. The same seed always plays the same endless song, for anyone.</p>
+        <input class="seed-edit" id="seed-input" name="seed" autocomplete="off" spellcheck="false" maxlength="64"
+          aria-label="Seed">
+        <h3>Styles</h3>
+        <p>The song wanders between the styles you keep on. A different set makes a different song.</p>
+        <div class="styles-list" id="styles"></div>
+        <button class="primary" type="submit">Play this seed</button>
+      </form>
+      <h3 id="recent-h" hidden>Recently played</h3>
+      <ul class="recent" id="recent"></ul>
+    </dialog>
+
+    <dialog id="about" aria-labelledby="about-h">
+      <button class="icon close" type="button" data-close
+        aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <h2 id="about-h">How it works</h2>
+      <p>There are no audio files here. Everything you hear is composed and synthesized in your browser, one sample at a time, from the seed.</p>
+      <h3>The seed plans an endless journey</h3>
+      <p>The seed picks a chain of movements. Each has a style, a key, a tempo and a form (intro, verse, chorus, build, drop, break, outro). Each movement leads to the next: keys move to close neighbours, styles to related ones.</p>
+      <h3>Every movement has a motif</h3>
+      <p>A two-bar idea is invented for each movement, then restated, answered and slowed down over whatever chords lie under it. Chords are voice-led so pads move like an ensemble.</p>
+      <h3>Sound from code</h3>
+      <p>Drums, basses, supersaws, an organ, an electric piano, bells and effects are synthesized in background workers. Each section is measured (ITU loudness) and leveled before you hear it, then played gaplessly with its reverb tail overlapping the next.</p>
+      <h3>The dial</h3>
+      <p>The ring is the circle of fifths, turned so the key's home note sits at the top. The shape inside is the chord playing now; sparks are notes, a line traces the melody. It reads the same score the synthesizer plays, so what you see is what you hear.</p>
+      <h3>Keyboard</h3>
+      <dl class="keys">
+        <dt><kbd>Space</kbd></dt>
+        <dd>Play or pause</dd>
+        <dt><kbd>←</kbd> <kbd>→</kbd></dt>
+        <dd>Back or forward 10 seconds</dd>
+        <dt><kbd>P</kbd> <kbd>N</kbd></dt>
+        <dd>Previous or next movement</dd>
+        <dt><kbd>R</kbd></dt>
+        <dd>Repeat this movement</dd>
+        <dt><kbd>D</kbd></dt>
+        <dd>New seed</dd>
+        <dt><kbd>S</kbd></dt>
+        <dd>Copy a link to this moment</dd>
+        <dt><kbd>M</kbd></dt>
+        <dd>Mute</dd>
+      </dl>
+      <p
+        style="margin-top: 18px">The synthesis started from <a href="https://github.com/ErwannRobin/ex-nihilo">EX NIHILO</a>, a 43-second demo whose soundtrack is computed the same way.</p>
+    </dialog>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
