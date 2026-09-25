@@ -142,7 +142,7 @@ const COLORS: Record<ColorId, Color> = {
   acid: {
     write: (ctx, v) =>
       acidLine(ctx, acidPattern(ctx.mrng.fork('colour-acid')), 0, ctx.bars, [260, 900], 0.75, 0.7 * v, false),
-    suits: { rise: 2, pulse: 2, ember: 1 },
+    suits: { rise: 2, pulse: 2 },
     busy: true,
   },
   glock: {

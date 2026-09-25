@@ -32,7 +32,7 @@ const GOLDEN: Record<string, string> = {
   'score:hello:0': '563f6da7',
   'score:hello:3': 'dc9949b7',
   'score:hello:11': '1a4ad3c2',
-  'score:hello:26': 'e0c5e115',
+  'score:hello:26': 'a6ce2464',
   'audio:hello:1': '5f9f6ba6f4fbc563',
   'audio:hello:7': 'fff84be46e7f5840',
   'plan:golden': '40971175',
@@ -46,7 +46,7 @@ const GOLDEN: Record<string, string> = {
   'score:golden-short:0': '3f7a6e1e',
   'score:golden-short:3': 'd43426e4',
   'score:golden-short:11': 'cc44b2f3',
-  'score:golden-short:26': 'b73fe926',
+  'score:golden-short:26': '438c67a6',
   'audio:golden-short:1': '1cfaa83b7a96841',
   'audio:golden-short:7': 'a2d7cc204a3a7596',
 };

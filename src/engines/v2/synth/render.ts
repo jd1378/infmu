@@ -320,7 +320,7 @@ function amp(b: Bus): void {
     // the scoop's band-pass peaks at Q: take 80% of the band out around 550 Hz (-14 dB)
     const toned = clipped - (0.8 * scoop.bp) / 0.6;
     presence.run(toned);
-    out[i] = (cab2.run(cab1.run(toned)) + (0.5 * presence.bp) / 1.2) * 0.4;
+    out[i] = (cab2.run(cab1.run(toned)) + (0.5 * presence.bp) / 1.2) * 0.2;
   }
   for (let i = 0; i < n; i++) {
     const d = 1 - 0.3 * (1 - b.duck[i]);

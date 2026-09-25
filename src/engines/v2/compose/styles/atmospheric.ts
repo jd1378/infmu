@@ -22,7 +22,6 @@ import {
   arpNotes,
   crash,
   drums,
-  guitarVoicing,
   organChords,
   padChords,
   pianoBar,
@@ -306,34 +305,25 @@ export function ember(ctx: Ctx): void {
   const clean = (b: number, v: number, density: 0 | 1 | 2 = 1) => {
     if (density === 0) return pick(ctx, b, 'electric', [0, -1, 3, -1, 4, -1, 5, -1], 2, v, 52);
     if (density === 1) return pick(ctx, b, 'electric', [0, 3, 4, 5, 3, 4], 2, v, 52);
-    if (tremolo) {
-      const ns = guitarVoicing(ctx.chordAt(b), 52).slice(-3);
-      for (let s = 0; s < 16; s++) {
-        ctx.push({
-          i: 'string',
-          t: ctx.barAt(b, s),
-          n: ns[Math.floor(s / 4) % ns.length],
-          v: v * (s % 2 ? 0.7 : 0.9),
-          k: 'electric',
-          d: ctx.s16,
-        });
-      }
-    } else pick(ctx, b, 'electric', [0, 3, 4, 5, 3, 4, 5, 3], 1, v * 0.85, 52);
+    // the climax: the arpeggio in 16ths across the chord (re-plucking one note on every 16th sounds like a
+    // machine, not like tremolo picking)
+    pick(ctx, b, 'electric', tremolo ? [3, 4, 5, 4, 3, 4, 5, 4] : [0, 3, 4, 5, 3, 4, 5, 3], 1, v * 0.8, 52);
   };
+  // the wall of guitars: power chords strummed on beats 1 and 3 and left to ring, a wash under the melody
+  // rather than a chug (under heavy drive a third or a tenth intermodulates into mud)
   const wall = (b: number, v: number) => {
-    // a power chord: under heavy drive a third or a tenth intermodulates into mud
     const r = ctx.root(ctx.chordAt(b));
     const low = r < 40 ? r + 12 : r;
     const ns = [low, low + 7, low + 12];
-    for (let s = 0; s < 16; s += 2) {
-      for (const n of ns) {
+    for (const s of [0, 8]) {
+      for (const [k, n] of ns.entries()) {
         ctx.push({
           i: 'string',
-          t: ctx.barAt(b, s) + 0.004 * (n % 3),
+          t: ctx.barAt(b, s) + 0.012 * k,
           n,
-          v: v * (s % 4 ? 0.85 : 1),
+          v: v * (s ? 0.8 : 1),
           k: 'overdrive',
-          d: ctx.s16 * 2,
+          d: ctx.s16 * 8,
         });
       }
     }
