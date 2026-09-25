@@ -768,9 +768,14 @@
         <p>Any words work. The same seed always plays the same endless song, for anyone.</p>
         <input class="seed-edit" id="seed-input" name="seed" autocomplete="off" spellcheck="false" maxlength="64"
           aria-label="Seed">
+        <h3>Composer</h3>
+        <p>Each version composes differently. Within a version, a seed plays the same song forever.</p>
+        <div class="styles-list" id="versions"></div>
         <h3>Styles</h3>
         <p>The song wanders between the styles you keep on. A different set makes a different song.</p>
         <div class="styles-list" id="styles"></div>
+        <h3 id="length-h">Length</h3>
+        <div class="styles-list" id="lengths"></div>
         <button class="primary" type="submit">Play this seed</button>
       </form>
       <h3 id="recent-h" hidden>Recently played</h3>
@@ -783,13 +788,33 @@
       <h2 id="about-h">How it works</h2>
       <p>There are no audio files here. Everything you hear is composed and synthesized in your browser, one sample at a time, from the seed.</p>
       <h3>The seed plans an endless journey</h3>
-      <p>The seed picks a chain of movements. Each has a style, a key, a tempo and a form (intro, verse, chorus, build, drop, break, outro). Each movement leads to the next: keys move to close neighbours, styles to related ones.</p>
-      <h3>Every movement has a motif</h3>
-      <p>A two-bar idea is invented for each movement, then restated, answered and slowed down over whatever chords lie under it. Chords are voice-led so pads move like an ensemble.</p>
+      <p>
+          The seed picks a chain of movements (their length is yours to choose). Each has a style, a key, a
+          tempo and a song form, and builds from quiet to a peak near its end. Keys move to close neighbours, styles to related ones, and a movement often rings out into a few
+          seconds of rest before the next begins.
+        </p>
+      <h3>Every movement has its motifs</h3>
+      <p>
+          Each movement invents a hook, a short rhythmic idea heard twice and then let go, and builds it into phrases
+          the way songwriters do: question and answer, statement and development, a rising sequence. Every chorus
+          restates it on the movement's own lead voice, bigger each time; a last chorus may lift a key, and silence is
+          written in too.
+        </p>
       <h3>Sound from code</h3>
-      <p>Drums, basses, supersaws, an organ, an electric piano, bells and effects are synthesized in background workers. Each section is measured (ITU loudness) and leveled before you hear it, then played gaplessly with its reverb tail overlapping the next.</p>
+      <p>
+          Drums and hand percussion, pianos, guitars through an amp model, strings, an organ, mallets, bells, flute,
+          saxophone, a choir, a hummed voice and synthesizers are all computed in background workers, from physical
+          and spectral models. Each section is mixed in stems by measurement (ITU loudness) and leveled to its place
+          in the movement's arc before you hear it, then played
+          gaplessly with its reverb tail overlapping the next.
+        </p>
       <h3>The dial</h3>
       <p>The ring is the circle of fifths, turned so the key's home note sits at the top. The shape inside is the chord playing now; sparks are notes, a line traces the melody. It reads the same score the synthesizer plays, so what you see is what you hear.</p>
+      <h3>Versions</h3>
+      <p>
+          The composer improves in new versions, but old ones never change: a seed is tied to the version that
+          played it, and links carry it. New seeds use the latest version; Choose seed lets you pick another.
+        </p>
       <h3>Keyboard</h3>
       <dl class="keys">
         <dt><kbd>Space</kbd></dt>

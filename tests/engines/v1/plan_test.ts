@@ -1,6 +1,6 @@
 import { assert, assertAlmostEquals, assertEquals, assertThrows } from '@std/assert';
-import { sectionDuration, Song } from '../../src/core/plan.ts';
-import { STYLE_IDS } from '../../src/core/styles.ts';
+import { sectionDuration, Song } from '../../../src/engines/v1/plan.ts';
+import { STYLE_IDS } from '../../../src/engines/v1/styles.ts';
 
 Deno.test('a seed plans the same journey however it is explored', () => {
   const a = new Song('journey');

@@ -1,9 +1,9 @@
 // The page takes its colour from the music: the key's place on the circle of fifths sets the hue, the mode
 // sets how bright and saturated it is. A modulation recolours everything.
 
-import type { Key, ModeName } from '../core/theory.ts';
+import type { KeyInfo } from '../core/engine.ts';
 
-const MODE_LIGHT: Record<ModeName, [l: number, c: number]> = {
+const MODE_LIGHT: Record<string, [l: number, c: number]> = {
   lydian: [0.86, 0.13],
   ionian: [0.84, 0.12],
   mixolydian: [0.82, 0.12],
@@ -22,8 +22,8 @@ export interface Tint {
 /** Position of a pitch class on the circle of fifths: C 0, G 1, D 2 ... F 11. */
 export const fifths = (pc: number) => (pc * 7) % 12;
 
-export function tintFor(key: Key): Tint {
-  const [l, c] = MODE_LIGHT[key.mode];
+export function tintFor(key: KeyInfo): Tint {
+  const [l, c] = MODE_LIGHT[key.mode] ?? [0.8, 0.12];
   return { h: (fifths(key.tonic) * 30 + 285) % 360, l, c };
 }
 

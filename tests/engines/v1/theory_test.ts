@@ -8,7 +8,7 @@ import {
   midiToDegree,
   pc,
   voiceLead,
-} from '../../src/core/theory.ts';
+} from '../../../src/engines/v1/theory.ts';
 
 const dMinor: Key = { tonic: 2, mode: 'aeolian' };
 const cMajor: Key = { tonic: 0, mode: 'ionian' };

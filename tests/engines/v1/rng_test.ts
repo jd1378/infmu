@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertNotEquals } from '@std/assert';
-import { hash32, hashString, Rng } from '../../src/core/rng.ts';
+import { hash32, hashString, Rng } from '../../../src/engines/v1/rng.ts';
 
 const draw = (r: Rng, n: number) => Array.from({ length: n }, () => r.u32());
 

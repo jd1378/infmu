@@ -3,9 +3,8 @@
 // class (low notes near the centre, high ones near the rim), and the melody leaves a trail. It reads the
 // same score the synthesizer plays, so every mark corresponds to a sound.
 
+import type { Cue, SectionScore } from '../core/engine.ts';
 import type { Position } from '../core/player.ts';
-import { MODES, noteName, pc } from '../core/theory.ts';
-import type { Ev, Score } from '../core/types.ts';
 import { fifths, type Tint } from './theme.ts';
 
 interface Spark {
@@ -24,6 +23,7 @@ interface TrailPoint {
 }
 
 const TAU = Math.PI * 2;
+const pc = (midi: number) => ((midi % 12) + 12) % 12;
 const angleOf = (pitchClass: number) => (fifths(pitchClass) / 12) * TAU;
 const radiusOf = (midi: number) => Math.min(1, Math.max(0.12, (midi - 28) / 68));
 /** Shortest signed difference between two angles. */
@@ -43,8 +43,6 @@ export class Dial {
   private kick = 0;
   private flash = 0;
   private rings: number[] = [];
-  /** Notes of lead phrases, which arrive as one event per phrase, waiting for their time. */
-  private pendingNotes: { t: number; n: number; d: number; v: number }[] = [];
   private last: { index: number; offset: number } | null = null;
   private lastFrame = 0;
   private tint: Tint = { h: 285, l: 0.8, c: 0.12 };
@@ -67,7 +65,7 @@ export class Dial {
     const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
     this.lastFrame = now;
     const score = pos.score;
-    const key = score.movement.key;
+    const key = score.key;
 
     if (playing) this.consume(pos, score);
     else this.last = { index: pos.index, offset: pos.offset };
@@ -89,90 +87,73 @@ export class Dial {
 
   // ------------------------------------------------------------------ events -> visuals
 
-  private consume(pos: Position, score: Score): void {
+  private consume(pos: Position, score: SectionScore): void {
     const prev = this.last;
     this.last = { index: pos.index, offset: pos.offset };
     // a new section, a seek or a stall: start reading from here without replaying what we skipped
     if (!prev || prev.index !== pos.index || pos.offset < prev.offset || pos.offset - prev.offset > 0.5) {
-      this.pendingNotes = [];
       if (prev && prev.index !== pos.index && pos.offset < 0.5) this.spawnRange(score, -1, pos.offset);
       return;
     }
     this.spawnRange(score, prev.offset, pos.offset);
   }
 
-  private spawnRange(score: Score, from: number, to: number): void {
-    for (const e of score.events) {
-      if (e.t > to) break;
-      if (e.t > from) this.spawn(e);
+  private spawnRange(score: SectionScore, from: number, to: number): void {
+    for (const c of score.cues) {
+      if (c.t > to) break;
+      if (c.t > from) this.spawn(c);
     }
   }
 
-  private spawn(e: Ev): void {
-    const add = (n: number, size: number, life: number, alpha: number) =>
-      this.sparks.push({ a: angleOf(pc(n)), r: radiusOf(n), size, age: 0, life: Math.min(life, 5), alpha });
-    switch (e.i) {
+  private spawn(c: Cue): void {
+    const add = (size: number, life: number, alpha: number) => {
+      if (c.n === undefined) return;
+      this.sparks.push({ a: angleOf(pc(c.n)), r: radiusOf(c.n), size, age: 0, life: Math.min(life, 5), alpha });
+    };
+    const d = c.d ?? 0.5;
+    switch (c.kind) {
       case 'kick':
-        this.kick = Math.max(this.kick, e.v);
+        this.kick = Math.max(this.kick, c.v);
         break;
       case 'snare':
-        if (e.k !== 'roll' && e.k !== 'rim') this.rings.push(0);
+        this.rings.push(0);
         break;
       case 'impact':
-        this.flash = Math.max(this.flash, e.a);
+        this.flash = Math.max(this.flash, c.v);
         break;
       case 'pad':
-        for (const n of e.n) add(n, 12, e.d + 0.5, 0.22);
+        add(12, d, 0.22);
         break;
-      case 'organ':
-        add(e.n, 11, e.d, 0.2);
-        break;
-      case 'keys':
-        for (const n of e.n) add(n, 7, e.d + 0.2, 0.4 * e.v);
+      case 'chord':
+        add(7, d, 0.4 * c.v);
         break;
       case 'bass':
-        add(e.n, 8, Math.max(0.25, e.d), 0.45 * e.v);
+        add(8, Math.max(0.25, d), 0.45 * c.v);
         break;
       case 'pluck':
-        add(e.n, 3.5, 0.45, 0.8 * e.v);
+        add(3.5, d, 0.8 * c.v);
         break;
-      case 'tom':
-        add(e.n, 5, 0.4, 0.6 * e.v);
+      case 'perc':
+        add(5, d, 0.6 * c.v);
         break;
       case 'bell':
-        for (const n of e.n) {
-          add(n, 5.5, 2.5, 1 * e.v);
-          this.trailTo(n);
-        }
+        add(5.5, d, c.v);
+        this.trailTo(c.n);
         break;
-      case 'lead':
-        // a lead is one event per phrase: queue each note at its own time
-        for (const note of e.ns) this.pendingNotes.push({ t: note.t, n: note.n, d: note.d, v: note.v });
-        this.pendingNotes.sort((x, y) => x.t - y.t);
+      case 'melody':
+        add(6, Math.min(3, d + 0.4), c.v);
+        this.trailTo(c.n);
         break;
     }
   }
 
-  private trailTo(n: number): void {
+  private trailTo(n: number | undefined): void {
+    if (n === undefined) return;
     this.trail.push({ a: angleOf(pc(n)), r: radiusOf(n), age: 0 });
     if (this.trail.length > 24) this.trail.shift();
   }
 
   private age(dt: number): void {
-    // lead notes queued from their phrase event fire when their time comes
-    const off = this.last?.offset ?? 0;
-    while (this.pendingNotes.length && this.pendingNotes[0].t <= off) {
-      const n = this.pendingNotes.shift()!;
-      this.sparks.push({
-        a: angleOf(pc(n.n)),
-        r: radiusOf(n.n),
-        size: 6,
-        age: 0,
-        life: Math.min(3, n.d + 0.4),
-        alpha: n.v,
-      });
-      this.trailTo(n.n);
-    }
     for (const s of this.sparks) s.age += dt;
     this.sparks = this.sparks.filter((s) => s.age < s.life);
     if (this.sparks.length > 400) this.sparks.splice(0, this.sparks.length - 400);
@@ -208,14 +189,14 @@ export class Dial {
     return `oklch(${l} ${c} ${(this.tint.h + dh).toFixed(1)} / ${a.toFixed(3)})`;
   }
 
-  private draw(score: Score, pos: Position, playing: boolean): void {
+  private draw(score: SectionScore, pos: Position, playing: boolean): void {
     const g = this.g;
     const S = this.size;
     const cx = S / 2;
     const R = S * 0.36;
     const pulse = this.still ? 0 : this.kick;
     const energy = score.section.energy;
-    const key = score.movement.key;
+    const key = score.key;
     const { l, c } = this.tint;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.clearRect(0, 0, S, S);
@@ -247,7 +228,7 @@ export class Dial {
     }
 
     // the ring and its twelve pitch classes; notes of the mode are marked, the tonic is the accent
-    const scale = new Set(MODES[key.mode].map((x) => (x + key.tonic) % 12));
+    const scale = new Set(key.scale);
     const ringR = R * (1 + 0.012 * pulse);
     g.lineWidth = 1.5 + 1.5 * pulse;
     g.strokeStyle = this.col(0.5 + 0.2 * pulse, 0.05, 0.9);
@@ -269,7 +250,7 @@ export class Dial {
       const [lx, ly] = at(a, ringR + fs * 1.6);
       g.font = `${tonic ? 600 : 400} ${fs}px 'Hanken Grotesk', system-ui, sans-serif`;
       g.fillStyle = tonic ? this.col(l, c, 1) : inScale ? this.col(0.8, 0.02, 0.85) : this.col(0.55, 0.02, 0.6);
-      g.fillText(noteName(p, key), lx, ly);
+      g.fillText(key.names[p], lx, ly);
     }
 
     // snare shock rings

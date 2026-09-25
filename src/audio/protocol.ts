@@ -1,8 +1,16 @@
-import type { StyleId } from '../core/types.ts';
+// Messages to and from the render worker. `version` picks the composer engine; phrase, styles and length
+// identify the song within it.
+
+interface SongRef {
+  version: number;
+  phrase: string;
+  styles: string[];
+  length: string;
+}
 
 export type RenderRequest =
-  | { id: number; kind: 'section'; phrase: string; styles: StyleId[]; index: number; sampleRate: number }
-  | { id: number; kind: 'span'; phrase: string; styles: StyleId[]; from: number; count: number; sampleRate: number };
+  | SongRef & { id: number; kind: 'section'; index: number; sampleRate: number }
+  | SongRef & { id: number; kind: 'span'; from: number; count: number; sampleRate: number };
 
 /** A request before the pool assigns its id (Omit distributed over the union). */
 type WithoutId<T> = T extends RenderRequest ? Omit<T, 'id'> : never;

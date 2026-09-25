@@ -3,10 +3,9 @@
 // the joins are seamless. Seeking renders the target section and the one before it (for its tail), so
 // the music at any point sounds exactly as if you had listened from the start.
 
-import { composeSection, TAIL } from '../core/compose/index.ts';
-import type { Song } from '../core/plan.ts';
+import type { SectionScore, SongPlan } from '../core/engine.ts';
 import type { PlayerEvents, PlayerPort, PlayerState, Position } from '../core/player.ts';
-import type { Score } from '../core/types.ts';
+import { engine } from '../engines/index.ts';
 import { CancelledError, RenderPool } from './pool.ts';
 import { encodeWav } from './wav.ts';
 
@@ -27,7 +26,9 @@ interface Entry {
 
 export class WebPlayer implements PlayerPort {
   state: PlayerState = 'idle';
-  song: Song;
+  song: SongPlan;
+  /** Context time the latest start becomes audible. */
+  private audibleFrom = 0;
   repeat = false;
   volume = 0.8;
 
@@ -37,7 +38,7 @@ export class WebPlayer implements PlayerPort {
   private readonly pool: RenderPool;
   private readonly workerUrl: URL;
   private buffers = new Map<number, Promise<AudioBuffer>>();
-  private scores = new Map<number, Score>();
+  private scores = new Map<number, SectionScore>();
   private entries: Entry[] = [];
   /** Next section to schedule, and when (context time) it starts. */
   private cursor: { index: number; start: number } | null = null;
@@ -61,7 +62,7 @@ export class WebPlayer implements PlayerPort {
     error: new Set(),
   };
 
-  constructor(song: Song, workerUrl: URL, workers: number) {
+  constructor(song: SongPlan, workerUrl: URL, workers: number) {
     this.song = song;
     this.workerUrl = workerUrl;
     this.pool = new RenderPool(workerUrl, workers);
@@ -86,7 +87,7 @@ export class WebPlayer implements PlayerPort {
     return () => set.delete(fn);
   }
 
-  load(song: Song, index = 0, offset = 0): void {
+  load(song: SongPlan, index = 0, offset = 0): void {
     if (song !== this.song) {
       this.song = song;
       this.buffers.clear();
@@ -142,11 +143,11 @@ export class WebPlayer implements PlayerPort {
     return { index, offset, score, movementTime: score.offset + offset };
   }
 
-  score(index: number): Score {
+  score(index: number): SectionScore {
     let s = this.scores.get(index);
     if (!s) {
       if (this.scores.size > 48) this.scores.clear();
-      s = composeSection(this.song, index);
+      s = engine(this.song.version).score(this.song, index);
       this.scores.set(index, s);
     }
     return s;
@@ -184,16 +185,24 @@ export class WebPlayer implements PlayerPort {
   async exportMovement(m: number): Promise<Uint8Array<ArrayBuffer>> {
     const mv = this.song.movement(m);
     const sampleRate = this.ctx?.sampleRate ?? 48000;
-    // its own worker, so a long export never holds up the sections playback is waiting for
+    const job = {
+      kind: 'span' as const,
+      version: this.song.version,
+      phrase: this.song.phrase,
+      styles: [...this.song.styles],
+      length: this.song.length,
+      from: mv.firstSection,
+      count: mv.sections.length,
+      sampleRate,
+    };
+    // its own worker, so a long export never holds up the sections playback is waiting for; if that worker
+    // can't start (a page left open across a new deploy: its worker file is gone), the running ones do it
     const pool = new RenderPool(this.workerUrl, 1);
     try {
-      const r = await pool.render({
-        kind: 'span',
-        phrase: this.song.phrase,
-        styles: [...this.song.styles],
-        from: mv.firstSection,
-        count: mv.sections.length,
-        sampleRate,
+      const r = await pool.render(job).catch((err) => {
+        if (err instanceof CancelledError) throw err;
+        console.warn('export worker failed, using the playback workers', err);
+        return this.pool.render(job);
       });
       return encodeWav(r.left, r.right, sampleRate);
     } finally {
@@ -246,16 +255,17 @@ export class WebPlayer implements PlayerPort {
     this.cursor = null;
     this.cancelQueued();
     this.setState('loading');
-    const withPrev = index > 0 && offset < TAIL;
+    const ringing = this.ringing(index, offset);
     try {
-      const [cur, prev] = await Promise.all([this.buffer(index), withPrev ? this.buffer(index - 1) : null]);
+      const [cur, ...earlier] = await Promise.all([this.buffer(index), ...ringing.map((r) => this.buffer(r.index))]);
       if (gen !== this.gen) return;
       if (ctx.state !== 'running') await ctx.resume();
       if (gen !== this.gen) return;
       this.stopAll(true);
       const t = ctx.currentTime + START_DELAY;
+      this.audibleFrom = t;
       const start = t - offset;
-      if (prev) this.schedule(index - 1, prev, start - this.score(index - 1).duration, true);
+      ringing.forEach((r, k) => this.schedule(r.index, earlier[k], start - r.before, true));
       this.schedule(index, cur, start);
       this.cursor = { index: this.next(index), start: start + this.score(index).duration };
       this.setState('playing');
@@ -264,6 +274,23 @@ export class WebPlayer implements PlayerPort {
       if (gen !== this.gen || err instanceof CancelledError) return;
       this.fail(err);
     }
+  }
+
+  /**
+   * Earlier sections whose tails still ring at `offset` into section `index` (usually just the one before;
+   * more when short sections such as a rest sit in between), with how long before `index` each one starts.
+   */
+  private ringing(index: number, offset: number): { index: number; before: number }[] {
+    const out: { index: number; before: number }[] = [];
+    let gap = offset; // from the end of section j to the place we start at
+    let before = 0; // from the start of section j to the start of `index`
+    for (let j = index - 1; j >= 0 && gap < 10; j--) {
+      const s = this.score(j);
+      before += s.duration;
+      if (gap < s.tail) out.push({ index: j, before });
+      gap += s.duration;
+    }
+    return out;
   }
 
   /** Keeps LOOKAHEAD seconds scheduled, rendering one section at a time. */
@@ -314,8 +341,10 @@ export class WebPlayer implements PlayerPort {
       const ctx = this.ensureContext();
       const mine: Promise<AudioBuffer> = this.pool.render({
         kind: 'section',
+        version: this.song.version,
         phrase: this.song.phrase,
         styles: [...this.song.styles],
+        length: this.song.length,
         index,
         sampleRate: ctx.sampleRate,
       }).then((r) => {
@@ -385,6 +414,8 @@ export class WebPlayer implements PlayerPort {
     // while loading, what matters is where we're going, not the audio still fading out
     if (!this.ctx || this.state === 'loading' || !this.entries.length) return this.pending;
     const t = this.audibleTime();
+    // a start is scheduled a moment ahead: until it's heard, the place is the one asked for
+    if (t < this.audibleFrom) return this.pending;
     let cur: Entry | null = null;
     let upcoming: Entry | null = null;
     for (const e of this.entries) {

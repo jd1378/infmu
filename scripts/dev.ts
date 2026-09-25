@@ -17,7 +17,7 @@ async function rebuild(): Promise<void> {
   do {
     again = false;
     try {
-      await build({ minify: false });
+      await build({ minify: false, clean: false });
     } catch (err) {
       console.error(err instanceof Error ? err.message : err);
     }

@@ -1,9 +1,9 @@
 import { assert, assertEquals } from '@std/assert';
-import { composeSection } from '../../src/core/compose/index.ts';
-import { Song } from '../../src/core/plan.ts';
-import { STYLE_IDS } from '../../src/core/styles.ts';
-import { MODES, pc } from '../../src/core/theory.ts';
-import type { Ev, Note } from '../../src/core/types.ts';
+import { composeSection } from '../../../src/engines/v1/compose/index.ts';
+import { Song } from '../../../src/engines/v1/plan.ts';
+import { STYLE_IDS } from '../../../src/engines/v1/styles.ts';
+import { MODES, pc } from '../../../src/engines/v1/theory.ts';
+import type { Ev, Note } from '../../../src/engines/v1/types.ts';
 
 const numbers = (e: Ev): number[] =>
   Object.values(e).flatMap((v) =>

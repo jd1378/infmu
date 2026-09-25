@@ -1,8 +1,7 @@
 // The contract between the interface and whatever plays the music. The UI only knows this port; the
 // browser implementation lives in src/audio.
 
-import type { Song } from './plan.ts';
-import type { Score } from './types.ts';
+import type { SectionScore, SongPlan } from './engine.ts';
 
 export type PlayerState = 'idle' | 'loading' | 'playing' | 'paused';
 
@@ -10,7 +9,7 @@ export interface Position {
   /** Global section index and seconds into it. */
   index: number;
   offset: number;
-  score: Score;
+  score: SectionScore;
   /** Seconds into the section's movement. */
   movementTime: number;
 }
@@ -18,25 +17,25 @@ export interface Position {
 export interface PlayerEvents {
   state: PlayerState;
   /** A new section became audible. */
-  section: Score;
+  section: SectionScore;
   error: string;
 }
 
 export interface PlayerPort {
   readonly state: PlayerState;
-  readonly song: Song;
+  readonly song: SongPlan;
   readonly repeat: boolean;
   readonly volume: number;
 
   /** Switches to another song (or position) without starting playback if paused. */
-  load(song: Song, index?: number, offset?: number): void;
+  load(song: SongPlan, index?: number, offset?: number): void;
   play(): Promise<void>;
   pause(): void;
   seek(index: number, offset: number): void;
   /** What is audible right now (latency-compensated), or the pending start position when stopped. */
   position(): Position;
   /** The score of a section, composed on demand (cheap and cached). */
-  score(index: number): Score;
+  score(index: number): SectionScore;
   setRepeat(on: boolean): void;
   setVolume(v: number): void;
   /** Fades out and pauses after `minutes`; null cancels. */

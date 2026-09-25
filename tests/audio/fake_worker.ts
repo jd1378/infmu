@@ -1,12 +1,13 @@
 import type { RenderRequest } from '../../src/audio/protocol.ts';
-import { Song } from '../../src/core/plan.ts';
+import { engine } from '../../src/engines/index.ts';
 
 const DELAY = Number(new URL(import.meta.url).searchParams.get('delay') ?? 100);
 
 self.onmessage = (ev: MessageEvent<RenderRequest>) => {
   const req = ev.data;
   if (req.kind !== 'section') return;
-  const seconds = new Song(req.phrase, req.styles).section(req.index).duration + 5;
+  const song = engine(req.version).song(req.phrase, req.styles, req.length);
+  const seconds = song.section(req.index).duration + 5;
   const until = Date.now() + DELAY;
   while (Date.now() < until) { /* busy, like a real render */ }
   const left = new Float32Array(Math.round(seconds * req.sampleRate));

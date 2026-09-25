@@ -1,9 +1,9 @@
 import { assert, assertAlmostEquals, assertEquals } from '@std/assert';
-import { composeSection } from '../../src/core/compose/index.ts';
-import { Song } from '../../src/core/plan.ts';
-import { lufs } from '../../src/core/synth/dsp.ts';
-import { renderScore } from '../../src/core/synth/render.ts';
-import { renderSpan } from '../../src/core/synth/span.ts';
+import { composeSection } from '../../../src/engines/v1/compose/index.ts';
+import { Song } from '../../../src/engines/v1/plan.ts';
+import { lufs } from '../../../src/engines/v1/synth/dsp.ts';
+import { renderScore } from '../../../src/engines/v1/synth/render.ts';
+import { renderSpan } from '../../../src/engines/v1/synth/span.ts';
 
 // low sample rate keeps these fast; the DSP is rate-independent
 const SR = 16000;

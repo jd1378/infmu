@@ -1,14 +1,12 @@
 // The page: now-playing details, the dial, the player bar, dialogs and keyboard. It talks to the music only
-// through PlayerPort and to the song plan through the domain.
+// through PlayerPort, and to songs through the engine port of whichever composer version made them.
 
-import { Song } from '../core/plan.ts';
+import type { MovementInfo, SectionScore, SongPlan } from '../core/engine.ts';
 import type { PlayerPort } from '../core/player.ts';
 import { displaySeed, randomSeedPhrase, roman } from '../core/seed.ts';
-import { STYLE_IDS, STYLES } from '../core/styles.ts';
-import { keyName, MODE_LABEL, noteName } from '../core/theory.ts';
-import type { Movement, Score, StyleId } from '../core/types.ts';
+import { engine, isVersion, LATEST_VERSION, LEGACY_VERSION, VERSIONS } from '../engines/index.ts';
 import { Dial } from './dial.ts';
-import { clock, ROLE_LABEL, styleLabel } from './format.ts';
+import { clock, roleLabel, styleLabel } from './format.ts';
 import { bindMediaSession } from './media.ts';
 import { recentSeeds, rememberSeed, storedVolume, storeVolume } from './storage.ts';
 import { applyTint, tintFor } from './theme.ts';
@@ -20,25 +18,37 @@ const SLEEP_STEPS = [null, 15, 30, 60, 90] as const;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-export function startApp(makePlayer: (song: Song) => PlayerPort): void {
+/** Styles worth writing into a link: none when all of the version's styles are on. */
+const stylesOf = (s: SongPlan) => s.styles.length < engine(s.version).styles.length ? [...s.styles] : undefined;
+
+const placeOf = (s: SongPlan, movement?: number, time?: number) =>
+  hashFor({ seed: s.phrase, version: s.version, length: s.length, styles: stylesOf(s), movement, time });
+
+export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const initial = readHash();
-  let song = new Song(initial.seed ?? randomSeedPhrase(), initial.styles);
+  // a link without a version predates versions and was made by v1; a fresh visit gets the latest composer
+  const asked = initial.version ?? (initial.seed ? LEGACY_VERSION : LATEST_VERSION);
+  let song = engine(isVersion(asked) ? asked : LATEST_VERSION).song(
+    initial.seed ?? randomSeedPhrase(),
+    initial.styles,
+    initial.length,
+  );
   const player = makePlayer(song);
   const start = initial.movement !== undefined
     ? song.locate(initial.movement, initial.time ?? 0)
     : { index: 0, offset: 0 };
   player.load(song, start.index, start.offset);
   player.setVolume(storedVolume() ?? 0.8);
-  history.replaceState(
-    null,
-    '',
-    hashFor({ seed: song.phrase, styles: [...song.styles], movement: song.section(start.index).movement.index }),
-  );
+  // a link from a composer this build doesn't have (a newer one) plays with the latest instead; its address is
+  // left alone so it still works where that composer exists
+  let foreignLink = !isVersion(asked);
+  if (!foreignLink) history.replaceState(null, '', placeOf(song, song.section(start.index).movement.index));
 
   const dial = new Dial($<HTMLCanvasElement>('dial'), reduced);
   const el = {
     seed: $('seed'),
+    seedLabel: $('seed-label'),
     title: $('mv-title'),
     style: $('f-style'),
     key: $('f-key'),
@@ -75,18 +85,28 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
   // ------------------------------------------------------------------ now playing
 
   let shownIndex = -1;
-  let shownMovement: Movement | null = null;
+  let shownMovement: MovementInfo | null = null;
   let shownChord = -1;
   let chordChips: number[] = []; // chord span index -> chip index
   let segFills: HTMLElement[] = [];
   let segEls: HTMLElement[] = [];
 
-  function showSection(score: Score): void {
+  let shownKey = '';
+
+  function showSection(score: SectionScore): void {
     wake();
     shownIndex = score.index;
     const mv = score.movement;
     if (mv !== shownMovement) showMovement(mv);
-    el.section.textContent = `${ROLE_LABEL[score.section.role]}, ${score.local + 1} of ${mv.sections.length}`;
+    // a key change inside a movement (a lifted last chorus) recolours the page and turns the dial
+    if (score.key.label !== shownKey) {
+      shownKey = score.key.label;
+      el.key.textContent = score.key.label;
+      const tint = tintFor(score.key);
+      applyTint(tint);
+      dial.setTint(tint);
+    }
+    el.section.textContent = `${roleLabel(score.section.role)}, ${score.local + 1} of ${mv.sections.length}`;
     // the progression once (not every repeat of it), with a chord held over bars merged into one chip
     const names = score.chords.map((c) => c.name);
     const period = [...names.keys()].slice(1).find((p) => names.every((n, i) => n === names[i % p])) ?? names.length;
@@ -105,40 +125,37 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
     segEls.forEach((s, i) => s.classList.toggle('hot', i === score.local));
   }
 
-  function showMovement(mv: Movement): void {
+  function showMovement(mv: MovementInfo): void {
     shownMovement = mv;
     el.seed.textContent = displaySeed(song.phrase);
+    el.seedLabel.textContent = `Seed, composer v${song.version}`;
     el.title.querySelector('.num')!.textContent = `${roman(mv.index + 1)}.`;
     el.title.querySelector('.name')!.textContent = mv.title;
     el.style.textContent = styleLabel(mv.style);
-    el.key.textContent = keyName(mv.key);
     el.tempo.textContent = `${mv.bpm} BPM${mv.swing > 0.05 ? ', swung' : ''}`;
     const nx = song.movement(mv.index + 1);
     el.next.replaceChildren('Up next: ');
     const b = document.createElement('b');
     b.textContent = `${roman(nx.index + 1)}. ${nx.title}`;
-    el.next.append(b, `, ${STYLES[nx.style].genre} in ${noteName(nx.key.tonic, nx.key)} ${MODE_LABEL[nx.key.mode]}`);
-    const tint = tintFor(mv.key);
-    applyTint(tint);
-    dial.setTint(tint);
+    el.next.append(b, `, ${nx.style.genre} in ${nx.key.label}`);
     document.title = `${roman(mv.index + 1)}. ${mv.title} | infmu`;
     buildSegments(mv);
     el.end.textContent = clock(mv.duration);
-    history.replaceState(null, '', hashFor({ seed: song.phrase, styles: [...song.styles], movement: mv.index }));
-    rememberSeed(song.phrase);
+    if (!foreignLink) history.replaceState(null, '', placeOf(song, mv.index));
+    rememberSeed(song.phrase, song.version, song.length);
     // the dial snapshot becomes the cover art once a few frames have been drawn in the new key
     setTimeout(() => {
       const art = (document.getElementById('dial') as HTMLCanvasElement).toDataURL('image/png');
       media.meta(
         `${roman(mv.index + 1)}. ${mv.title}`,
         `infmu, seed ${song.phrase}`,
-        `${STYLES[mv.style].name} in ${keyName(mv.key)}`,
+        `${mv.style.name} in ${mv.key.label}`,
         art,
       );
     }, 1500);
   }
 
-  function buildSegments(mv: Movement): void {
+  function buildSegments(mv: MovementInfo): void {
     el.segments.replaceChildren();
     segFills = [];
     segEls = [];
@@ -146,12 +163,12 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
       const seg = document.createElement('div');
       seg.className = 'seg';
       seg.style.flex = `${s.bars} 1 0`;
-      seg.title = ROLE_LABEL[s.role];
+      seg.title = roleLabel(s.role);
       const fill = document.createElement('div');
       fill.className = 'fill';
       const label = document.createElement('span');
       label.className = 'seg-label';
-      label.textContent = ROLE_LABEL[s.role];
+      label.textContent = roleLabel(s.role);
       seg.append(fill);
       el.segments.append(seg);
       seg.append(label);
@@ -197,6 +214,16 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  if (foreignLink) {
+    setTimeout(
+      () =>
+        toast(
+          `This link was made by composer v${asked}, which this page doesn't have yet. Playing v${song.version}.`,
+          6000,
+        ),
+      400,
+    );
+  }
   setInterval(() => {
     const pos = player.position();
     if (player.state === 'playing') media.progress(pos.movementTime, pos.score.movement.duration);
@@ -349,8 +376,13 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
       toast('Download ready');
     } catch (err) {
+      console.error(err);
+      const why = err instanceof Error ? err.message : String(err);
       toast(
-        err instanceof Error && err.name === 'CancelledError' ? 'Download cancelled' : 'Could not render the download',
+        err instanceof Error && err.name === 'CancelledError'
+          ? 'Download cancelled'
+          : `Could not render the download: ${why}`,
+        6000,
       );
     } finally {
       el.download.disabled = false;
@@ -361,30 +393,37 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
 
   function loadSong(
     phrase: string,
-    styles: readonly StyleId[] | undefined,
+    version: number,
+    styles: readonly string[] | undefined,
     play: boolean,
-    at?: { m: number; t: number },
+    length?: string,
   ): void {
     const wasPlaying = player.state === 'playing' || player.state === 'loading';
-    song = new Song(phrase, styles);
-    const pos = at ? song.locate(at.m, at.t) : { index: 0, offset: 0 };
+    song = engine(version).song(phrase, styles, length);
     shownMovement = null;
     shownIndex = -1;
-    player.load(song, pos.index, pos.offset);
-    history.pushState(null, '', hashFor({ seed: song.phrase, styles: [...song.styles], movement: at?.m }));
+    player.load(song, 0, 0);
+    foreignLink = false;
+    history.pushState(null, '', placeOf(song));
     if (play || wasPlaying) void player.play();
   }
 
-  $('new-seed').addEventListener('click', () => loadSong(randomSeedPhrase(), song.styles, true));
+  // new seeds go to the latest composer, keeping the listener's style choice if they made one
+  const newSeed = () => {
+    const same = song.version === LATEST_VERSION;
+    loadSong(
+      randomSeedPhrase(),
+      LATEST_VERSION,
+      same ? stylesOf(song) : undefined,
+      true,
+      same ? song.length : undefined,
+    );
+  };
+  $('new-seed').addEventListener('click', newSeed);
 
   $('share').addEventListener('click', async () => {
     const pos = player.position();
-    const url = location.origin + location.pathname + hashFor({
-      seed: song.phrase,
-      styles: [...song.styles],
-      movement: pos.score.movement.index,
-      time: pos.movementTime,
-    });
+    const url = location.origin + location.pathname + placeOf(song, pos.score.movement.index, pos.movementTime);
     try {
       await navigator.clipboard.writeText(url);
       toast('Link copied. It opens at this exact moment.');
@@ -395,9 +434,14 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
 
   addEventListener('popstate', () => {
     const p = readHash();
-    const styles = p.styles ?? STYLE_IDS;
-    if (p.seed && (p.seed !== song.phrase || styles.join() !== song.styles.join())) {
-      song = new Song(p.seed, styles);
+    const version = p.version ?? LEGACY_VERSION;
+    if (!p.seed) return;
+    if (!isVersion(version)) return toast(`That link needs composer v${version}, which this page doesn't have`);
+    const next = engine(version).song(p.seed, p.styles, p.length);
+    const same = next.phrase === song.phrase && next.version === song.version && next.length === song.length &&
+      next.styles.join() === song.styles.join();
+    if (!same) {
+      song = next;
       shownMovement = null;
       shownIndex = -1;
       const pos = song.locate(p.movement ?? 0, p.time ?? 0);
@@ -422,44 +466,91 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
     })
   );
 
-  const chosen = new Set<StyleId>();
+  const chosen = new Set<string>();
+  let chosenVersion = song.version;
+  let chosenLength = song.length;
+
   function fillSeedDialog(): void {
     $<HTMLInputElement>('seed-input').value = displaySeed(song.phrase);
+    chosenVersion = song.version;
+    chosenLength = song.length;
     chosen.clear();
-    for (const s of song.styles) chosen.add(s);
-    const list = $('styles');
-    list.replaceChildren();
-    for (const id of STYLE_IDS) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chip';
-      b.textContent = styleLabel(id);
-      b.setAttribute('aria-pressed', String(chosen.has(id)));
-      b.addEventListener('click', () => {
-        if (chosen.has(id) && chosen.size === 1) return toast('Keep at least one style on');
-        if (chosen.has(id)) chosen.delete(id);
-        else chosen.add(id);
-        b.setAttribute('aria-pressed', String(chosen.has(id)));
-      });
-      list.append(b);
-    }
-    const recent = recentSeeds().filter((s) => s !== song.phrase);
+    for (const st of song.styles) chosen.add(st);
+    renderVersions();
+    renderStyles();
+    renderLengths();
+    const recent = recentSeeds().filter((r) =>
+      isVersion(r.version) && (r.seed !== song.phrase || r.version !== song.version)
+    );
     $('recent-h').hidden = !recent.length;
-    const ul = $('recent');
-    ul.replaceChildren(...recent.map((s) => {
+    $('recent').replaceChildren(...recent.map((r) => {
       const li = document.createElement('li');
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chip';
-      b.textContent = displaySeed(s);
+      const b = chip(displaySeed(r.seed) + (r.version === LATEST_VERSION ? '' : ` (v${r.version})`));
       b.addEventListener('click', () => {
         $<HTMLDialogElement>('seeds').close();
-        loadSong(s, [...chosen], true);
+        loadSong(r.seed, r.version, undefined, true, r.length);
       });
       li.append(b);
       return li;
     }));
   }
+
+  function chip(text: string, pressed?: boolean): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.textContent = text;
+    if (pressed !== undefined) b.setAttribute('aria-pressed', String(pressed));
+    return b;
+  }
+
+  function renderVersions(): void {
+    $('versions').replaceChildren(...VERSIONS.map((v) => {
+      const e = engine(v);
+      const b = chip(`v${v}, ${e.about}`, v === chosenVersion);
+      b.addEventListener('click', () => {
+        if (v === chosenVersion) return;
+        chosenVersion = v;
+        // a different composer has its own styles: start from all of them
+        chosen.clear();
+        for (const st of e.styles) chosen.add(st.id);
+        chosenLength = 'standard';
+        renderVersions();
+        renderStyles();
+        renderLengths();
+      });
+      return b;
+    }));
+  }
+
+  function renderLengths(): void {
+    const lengths = engine(chosenVersion).lengths ?? [];
+    $('length-h').hidden = !lengths.length;
+    $('lengths').replaceChildren(...lengths.map((l) => {
+      const b = chip(l.label, l.id === chosenLength);
+      b.addEventListener('click', () => {
+        chosenLength = l.id;
+        renderLengths();
+      });
+      return b;
+    }));
+  }
+
+  function renderStyles(): void {
+    $('styles').replaceChildren(
+      ...engine(chosenVersion).styles.map((st) => {
+        const b = chip(styleLabel(st), chosen.has(st.id));
+        b.addEventListener('click', () => {
+          if (chosen.has(st.id) && chosen.size === 1) return toast('Keep at least one style on');
+          if (chosen.has(st.id)) chosen.delete(st.id);
+          else chosen.add(st.id);
+          b.setAttribute('aria-pressed', String(chosen.has(st.id)));
+        });
+        return b;
+      }),
+    );
+  }
+
   $<HTMLFormElement>('seed-form').addEventListener('submit', (e) => {
     const phrase = $<HTMLInputElement>('seed-input').value;
     if (!phrase.trim()) {
@@ -467,7 +558,14 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
       toast('Type a seed, or use New seed for a random one');
       return;
     }
-    loadSong(phrase, STYLE_IDS.filter((s) => chosen.has(s)), true);
+    const all = engine(chosenVersion).styles;
+    loadSong(
+      phrase,
+      chosenVersion,
+      chosen.size < all.length ? all.map((st) => st.id).filter((id) => chosen.has(id)) : undefined,
+      true,
+      chosenLength,
+    );
   });
 
   // ------------------------------------------------------------------ keyboard
@@ -502,7 +600,7 @@ export function startApp(makePlayer: (song: Song) => PlayerPort): void {
         break;
       case 'd':
       case 'D':
-        loadSong(randomSeedPhrase(), song.styles, true);
+        newSeed();
         break;
       case 's':
       case 'S':

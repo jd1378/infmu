@@ -2,7 +2,9 @@
 import { assert, assertEquals } from '@std/assert';
 import { RenderPool } from '../../src/audio/pool.ts';
 import { WebPlayer } from '../../src/audio/player.ts';
-import { Song } from '../../src/core/plan.ts';
+import { engine } from '../../src/engines/index.ts';
+
+const song = (phrase: string) => engine(1).song(phrase);
 import { clock, fakeWorker, installFakeAudio, sleep, until } from './fake_audio.ts';
 
 installFakeAudio();
@@ -10,7 +12,7 @@ installFakeAudio();
 const opts = { sanitizeOps: false };
 
 async function withPlayer(seed: string, delay: number, workers: number, fn: (p: WebPlayer) => Promise<void>) {
-  const p = new WebPlayer(new Song(seed), fakeWorker(delay), workers);
+  const p = new WebPlayer(song(seed), fakeWorker(delay), workers);
   try {
     await fn(p);
   } finally {
@@ -27,7 +29,7 @@ Deno.test({
     withPlayer('one', 100, 1, async (p) => {
       await p.play();
       await settled(p);
-      p.load(new Song('two'));
+      p.load(song('two'));
       void p.play();
       await settled(p);
       assertEquals(p.state, 'playing');
@@ -81,7 +83,7 @@ Deno.test({
       await settled(p);
       p.seek(9, 0);
       await settled(p);
-      p.load(new Song('new'));
+      p.load(song('new'));
       p.pause();
       assertEquals(p.position().index, 0);
       await p.play();
@@ -159,7 +161,15 @@ Deno.test({
   ...opts,
   fn: async () => {
     const pool = new RenderPool(new URL('./does-not-exist.js', import.meta.url), 2);
-    const job = { kind: 'section' as const, phrase: 'a', styles: ['drift' as const], index: 0, sampleRate: 100 };
+    const job = {
+      kind: 'section' as const,
+      version: 1,
+      phrase: 'a',
+      styles: ['drift'],
+      length: 'standard',
+      index: 0,
+      sampleRate: 100,
+    };
     try {
       const first = await pool.render(job).then(() => 'ok', (e: Error) => e.message);
       assert(first !== 'ok');
@@ -170,4 +180,24 @@ Deno.test({
       pool.dispose();
     }
   },
+});
+
+Deno.test({
+  name: 'starting mid-section never shows a time before the place asked for',
+  ...opts,
+  fn: () =>
+    withPlayer('clock', 50, 2, async (p) => {
+      p.seek(1, 5);
+      void p.play();
+      await until(() => p.state === 'playing');
+      let last = -Infinity;
+      for (let k = 0; k < 20; k++) {
+        const { index, offset } = p.position();
+        const t = index === 1 ? offset : index > 1 ? Infinity : -Infinity;
+        assert(t >= 5 - 1e-9, `the clock shows ${offset.toFixed(3)} s into section ${index}`);
+        assert(t >= last, 'the clock went backwards');
+        last = t;
+        await sleep(15);
+      }
+    }),
 });

@@ -11,9 +11,14 @@ async function sha(text: string): Promise<string> {
   return [...new Uint8Array(d)].slice(0, 5).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function build({ minify }: { minify: boolean }): Promise<void> {
+/**
+ * `clean` empties dist/ first (production). The dev loop keeps earlier bundles, so a tab opened before a
+ * rebuild can still start workers from the files it was loaded with.
+ */
+export async function build({ minify, clean = true }: { minify: boolean; clean?: boolean }): Promise<void> {
   const tmp = `${DIST}/.bundle`;
-  await Deno.remove(DIST, { recursive: true }).catch(() => {});
+  if (clean) await Deno.remove(DIST, { recursive: true }).catch(() => {});
+  else await Deno.remove(tmp, { recursive: true }).catch(() => {});
   await Deno.mkdir(tmp, { recursive: true });
   const args = ['bundle', '--platform', 'browser', '--outdir', tmp, 'src/main.ts', 'src/worker.ts'];
   if (minify) args.push('--minify');

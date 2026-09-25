@@ -1,19 +1,13 @@
-import { STYLES } from '../core/styles.ts';
-import type { Role, StyleId } from '../core/types.ts';
+import type { StyleInfo } from '../core/engine.ts';
 
 export function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export const ROLE_LABEL: Record<Role, string> = {
-  intro: 'Intro',
-  verse: 'Verse',
-  chorus: 'Chorus',
-  build: 'Build',
-  drop: 'Drop',
-  break: 'Break',
-  outro: 'Outro',
-};
+const ROLE_LABEL: Record<string, string> = { prechorus: 'Pre-chorus', rest: 'Rest' };
 
-export const styleLabel = (s: StyleId) => `${STYLES[s].name}, ${STYLES[s].genre}`;
+/** "prechorus" -> "Pre-chorus", "drop" -> "Drop" */
+export const roleLabel = (role: string) => ROLE_LABEL[role] ?? role[0].toUpperCase() + role.slice(1);
+
+export const styleLabel = (s: StyleInfo) => `${s.name}, ${s.genre}`;

@@ -1,4 +1,4 @@
-import { hashString, type Rng } from './rng.ts';
+// Seed text utilities for the interface. Engines keep their own frozen copy of normalization and hashing.
 
 // deno-fmt-ignore
 const ADJECTIVES = [
@@ -38,10 +38,6 @@ export function normalizeSeed(text: string): string {
 /** Spaces and hyphens are the same seed, and spaces read better in a title. */
 export const displaySeed = (phrase: string) => normalizeSeed(phrase).replaceAll('-', ' ');
 
-export function seedNumber(phrase: string): number {
-  return hashString(normalizeSeed(phrase));
-}
-
 /** A fresh, memorable phrase. Uses the platform's randomness: this is the one non-deterministic choice. */
 export function randomSeedPhrase(random: (n: number) => number = cryptoInt): string {
   const a = ADJECTIVES[random(ADJECTIVES.length)];
@@ -54,13 +50,6 @@ function cryptoInt(n: number): number {
   const buf = new Uint32Array(1);
   crypto.getRandomValues(buf);
   return buf[0] % n;
-}
-
-const cap = (w: string) => w[0].toUpperCase() + w.slice(1);
-
-export function movementTitle(rng: Rng): string {
-  const noun = rng.pick(NOUNS);
-  return rng.chance(0.25) ? `${cap(noun)} of ${cap(rng.pick(NOUNS))}` : `${cap(rng.pick(ADJECTIVES))} ${cap(noun)}`;
 }
 
 const ROMAN: [number, string][] = [
