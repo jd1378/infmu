@@ -1,83 +1,274 @@
-// Plucked strings by Karplus-Strong: a burst of noise circulates in a delay line one period long, and a
-// gentle low-pass in the loop lets the highs die first, the way a real string's do. An allpass in the
-// loop supplies the fraction of a sample the period needs, so high notes stay in tune.
+// Plucked strings: a digital waveguide (extended Karplus-Strong) fitted to recorded notes.
 //
-// Acoustic guitar and harp ring through a body filter. Electric guitars are brighter and longer, heard
-// through a pickup (a comb from where it sits under the string); the overdriven one is summed on the amp
-// bus, so a chord distorts as a whole the way it does through a real amp.
+// - The pluck is a shape, not a noise burst: a string plucked at `beta` of its length from the bridge pushes
+//   on the bridge with a pulse `beta` of a period wide (partials fall as sin(k pi beta) / k), rounded by the
+//   finger or pick (a low-pass that opens with velocity and with the pitch of the string).
+// - The loss filter is a one-pole low-pass designed per note from two decay times measured on real strings,
+//   the fundamental's and 4 kHz's: low partials ring for seconds, the top dies in a fraction of one, so the
+//   note darkens as it decays instead of fading evenly.
+// - Two polarizations: a second loop, a few cents apart and decaying faster, takes part of the pluck. The sum
+//   beats and decays in two stages, as a real string does.
+// - The body (acoustic guitar, harp) and the pickup (electric) are linear, so they are commuted into the
+//   excitation: they shape the first 120 ms of input to the loops rather than every output sample, which
+//   keeps a voice about as cheap as a bare loop.
+// The overdriven guitar is summed dry on the amp bus, so a chord distorts as a whole the way it does through a
+// real amp.
 
-import type { Ev } from '../types.ts';
+import type { Ev, StringKind } from '../types.ts';
 import type { Bus } from './bus.ts';
 import { SVF } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 
+interface Model {
+  /** Pluck position range, as a fraction of the string from the bridge. */
+  beta: readonly [number, number];
+  /**
+   * Corner of the pluck's two-pole low-pass at 200 Hz and velocity 0.7, Hz. It rises with the note as
+   * (f / 200)^excTilt (higher strings carry faster waves) and by 4 octaves per unit of velocity.
+   */
+  exc: number;
+  excTilt: number;
+  /** T60 of the fundamental at 200 Hz, s, scaled by (200 / f)^tilt; and T60 at 4 kHz, s. */
+  t1: number;
+  tilt: number;
+  t4k: number;
+  /** Second polarization: share of the pluck, detune in cents, T60s relative to the first. */
+  pol: readonly [number, number, number];
+  /** Body: a high-pass under the air resonance [Hz, Q], and resonant modes [Hz, Q, peak gain] added to it. */
+  body?: { hp: readonly [number, number]; modes: readonly (readonly [number, number, number])[] };
+  /** Pickup: distance from the bridge as a fraction of the string, and its electrical resonance [Hz, Q]. */
+  pickup?: { at: number; res: readonly [number, number] };
+  /** Attack transient (the finger or pick, and the body's knock): length s, low-pass Hz, level. */
+  knock?: readonly [number, number, number];
+  /** Output gain: a note as loud (BS.1770) as the previous model's at the same velocity. */
+  gain: number;
+  /** Longest render, s; the last quarter fades out. */
+  maxLen: number;
+}
+
+const ELECTRIC: Model = {
+  beta: [0.15, 0.25],
+  exc: 4000,
+  excTilt: 0.3,
+  t1: 11,
+  tilt: 0.3,
+  t4k: 2.7,
+  pol: [0.3, 0.8, 0.5],
+  pickup: { at: 0.09, res: [2600, 1.5] },
+  gain: 0.84,
+  maxLen: 5,
+};
+
+const MODELS: Record<StringKind, Model> = {
+  // steel-string acoustic (a Martin HD-28): partial T60 ~13 s at 90 Hz down to ~1.2 s at 5.6 kHz
+  guitar: {
+    beta: [0.12, 0.2],
+    exc: 6500,
+    excTilt: 0.4,
+    t1: 7,
+    tilt: 0.35,
+    t4k: 1.4,
+    pol: [0.4, 3.5, 0.3],
+    body: { hp: [110, 0.9], modes: [[115, 6, 0.6], [200, 5, 1.2], [410, 4, 0.8], [2600, 0.8, 0.6]] },
+    knock: [0.012, 3000, 1.2],
+    gain: 0.79,
+    maxLen: 5,
+  },
+  // concert harp, plucked near the middle with the pad of the finger: even partials weak, a dark attack
+  harp: {
+    beta: [0.4, 0.48],
+    exc: 1800,
+    excTilt: 0.8,
+    t1: 10,
+    tilt: 0.2,
+    t4k: 0.4,
+    pol: [0.45, 4, 0.7],
+    body: { hp: [150, 0.8], modes: [[450, 1.5, 0.4]] },
+    knock: [0.02, 1200, 2],
+    gain: 0.99,
+    maxLen: 6,
+  },
+  // a Fender on its bridge pickup: long even sustain, flat up to the pickup's resonance
+  electric: ELECTRIC,
+  // the same guitar into the amp bus (its level sets how hard it drives the amp)
+  overdrive: { ...ELECTRIC, gain: 1 },
+};
+
+/** One polarization: a delay line with a one-pole loss filter and an allpass for the fraction of a sample. */
+class Loop {
+  private readonly buf: Float32Array;
+  private readonly N: number;
+  private readonly g: number;
+  private readonly c: number;
+  private readonly C: number;
+  private readonly mute: number;
+  private idx = 0;
+  private lp = 0;
+  private apx = 0;
+  private apy = 0;
+
+  /** f: frequency; t0, t4k: T60 at f and at 4 kHz, s. */
+  constructor(sr: number, f: number, t0: number, t4k: number) {
+    // one-pole y = (1 - c) x + c y[-1], times g, through the per-period gains wanted at f and at fh
+    const w0 = (2 * Math.PI * f) / sr;
+    const fh = Math.max(4000, 2 * f);
+    const wh = (2 * Math.PI * fh) / sr;
+    const G0 = 10 ** (-3 / (t0 * f));
+    const Gh = 10 ** (-3 / (Math.min(t0, (t4k * 4000) / fh) * f));
+    const r2 = (Gh / G0) ** 2;
+    const A = r2 - 1;
+    const B = 2 * (Math.cos(w0) - r2 * Math.cos(wh));
+    // A c^2 + B c + A = 0: the roots are reciprocal, take the one inside the unit circle
+    const c = A < 0 ? Math.min(0.95, Math.max(0, (-B + Math.sqrt(Math.max(0, B * B - 4 * A * A))) / (2 * A))) : 0;
+    this.c = c;
+    // the loop's gain peaks at DC, where it must stay under 1
+    this.g = Math.min(0.9999, (G0 * Math.sqrt(1 - 2 * c * Math.cos(w0) + c * c)) / (1 - c));
+    // the loss filter delays the loop by its phase delay at f; the delay line and the allpass make up the rest
+    const period = sr / f - Math.atan2(c * Math.sin(w0), 1 - c * Math.cos(w0)) / w0;
+    this.N = Math.max(2, Math.floor(period - 0.1));
+    // first-order allpass with a phase delay of exactly `frac` samples at f (not only near DC)
+    const frac = period - this.N;
+    this.C = Math.sin(((1 - frac) * w0) / 2) / Math.sin(((1 + frac) * w0) / 2);
+    this.mute = 10 ** (-3 / (0.12 * f)); // a hand on the string after note-off
+    this.buf = new Float32Array(this.N);
+  }
+
+  tick(input: number, held: boolean): number {
+    const x = this.buf[this.idx] + input;
+    this.lp = (1 - this.c) * x + this.c * this.lp;
+    const ap = this.C * this.lp + this.apx - this.C * this.apy;
+    this.apx = this.lp;
+    this.apy = ap;
+    this.buf[this.idx] = ap * (held ? this.g : this.g * this.mute);
+    this.idx = this.idx + 1 < this.N ? this.idx + 1 : 0;
+    return x;
+  }
+}
+
+/** Circular two-pole low-pass of one period: a first lap warms each stage up, so the period has no seam. */
+function roundOff(x: Float32Array, fc: number, sr: number): void {
+  const a = 1 - Math.exp((-2 * Math.PI * Math.min(fc, 0.45 * sr)) / sr);
+  for (let stage = 0; stage < 2; stage++) {
+    let y = 0;
+    for (let lap = 0; lap < 2; lap++) {
+      for (let i = 0; i < x.length; i++) {
+        y += a * (x[i] - y);
+        if (lap) x[i] = y;
+      }
+    }
+  }
+}
+
+/** Runs the body filter (a high-pass plus resonant modes in parallel) over x in place. */
+function radiate(x: Float32Array, body: NonNullable<Model['body']>, sr: number): void {
+  const hp = new SVF(sr, body.hp[0], body.hp[1]);
+  const modes = body.modes.map(([fr, q, gain]) => ({ f: new SVF(sr, fr, q), k: gain / q }));
+  for (let i = 0; i < x.length; i++) {
+    hp.run(x[i]);
+    let y = hp.hp;
+    for (const md of modes) {
+      md.f.run(hp.hp);
+      y += md.k * md.f.bp;
+    }
+    x[i] = y;
+  }
+}
+
+/**
+ * The first 120 ms of a note, before the loops: `pluck` is their input, one period of the pluck's force on the
+ * bridge shaped by the pickup or the body (linear filters, so shaping the input equals shaping the output:
+ * commuted synthesis); `knock` is heard directly, the finger or pick and the body it sets ringing.
+ */
+function excitation(b: Bus, e: E<'string'>, m: Model, f: number): { pluck: Float32Array; knock: Float32Array } {
+  const sr = b.sr;
+  const N = Math.max(2, Math.round(sr / f));
+  const beta = m.beta[0] + (m.beta[1] - m.beta[0]) * b.noise.unit();
+  const w = Math.max(1, Math.round(beta * N));
+  const shape = new Float32Array(N);
+  for (let i = 0; i < N; i++) shape[i] = (i < w ? 1 - w / N : -w / N) + 0.04 * b.noise.next();
+  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** (4 * (e.v - 0.7)), sr);
+  let mean = 0;
+  for (let i = 0; i < N; i++) mean += shape[i];
+  mean /= N;
+  let rms = 0;
+  for (let i = 0; i < N; i++) rms += (shape[i] -= mean) ** 2;
+  const norm = 0.25 / (Math.sqrt(rms / N) || 1);
+
+  // a body rings for a while; a pickup only adds its comb's delay and a short resonance
+  const pd = m.pickup ? Math.max(1, Math.round((m.pickup.at * sr) / f)) : 0;
+  const L = m.body ? Math.max(N + 1, Math.round(0.12 * sr)) : N + pd + Math.round(0.005 * sr);
+  const pluck = new Float32Array(L);
+  for (let i = 0; i < N; i++) pluck[i] = shape[i] * norm;
+  if (m.pickup) {
+    // the pickup senses the difference of the string's motion across its distance from the bridge (a comb),
+    // then its coil and the cable resonate
+    for (let i = L - 1; i >= pd; i--) pluck[i] -= pluck[i - pd];
+    const res = new SVF(sr, m.pickup.res[0], m.pickup.res[1]);
+    for (let i = 0; i < L; i++) pluck[i] = res.run(pluck[i]);
+  }
+  const knock = new Float32Array(m.knock ? L : 0);
+  if (m.knock) {
+    const [sec, fc, level] = m.knock;
+    const kl = Math.min(L, Math.round(sec * sr));
+    const a = 1 - Math.exp((-2 * Math.PI * fc) / sr);
+    let y = 0;
+    for (let i = 0; i < kl; i++) {
+      y += a * (b.noise.next() - y);
+      knock[i] = level * e.v * (1 - i / kl) ** 2 * y;
+    }
+  }
+  if (m.body) {
+    radiate(pluck, m.body, sr);
+    radiate(knock, m.body, sr);
+    // the body's ring, cut at 120 ms, fades out over the last 10
+    const fade = Math.round(0.01 * sr);
+    for (let i = 0; i < fade; i++) {
+      pluck[L - 1 - i] *= i / fade;
+      if (knock.length) knock[L - 1 - i] *= i / fade;
+    }
+  }
+  return { pluck, knock };
+}
+
 export function string(b: Bus, e: E<'string'>): void {
   const sr = b.sr;
   const f = b.hz(e.n);
-  const harp = e.k === 'harp';
-  const electric = e.k === 'electric' || e.k === 'overdrive';
-  // loop filter y = (1 - s)·x + s·x[-1]: more s, darker and shorter; its delay is s samples
-  const s = harp ? 0.3 : electric ? 0.22 : 0.5;
-  const period = sr / f - s;
-  if (period < 3) return;
-  const N = Math.floor(period - 0.1);
-  const frac = period - N;
-  const C = (1 - frac) / (1 + frac);
-  const t60 = (harp ? 4 : electric ? 5 : 2.6) * Math.pow(196 / f, 0.35);
-  const loss = 10 ** (-3 / (t60 * f));
-  const muted = 10 ** (-3 / (0.12 * f)); // a hand on the string after note-off
-
-  const buf = new Float32Array(N);
-  const bright = (harp ? 0.55 : electric ? 0.7 : 0.3) + 0.3 * e.v;
-  let lp = 0;
-  let mean = 0;
-  for (let i = 0; i < N; i++) {
-    lp += bright * (b.noise.next() - lp);
-    buf[i] = lp;
-    mean += lp;
-  }
-  mean /= N;
-  let peak = 1e-9;
-  for (let i = 0; i < N; i++) peak = Math.max(peak, Math.abs(buf[i] -= mean));
-  for (let i = 0; i < N; i++) buf[i] *= 0.8 / peak;
-
+  const m = MODELS[e.k];
+  if (sr / f < 4) return;
+  const t0 = m.t1 * (200 / f) ** m.tilt;
   const d = e.d ?? Infinity;
-  const body = harp || electric ? null : new SVF(sr, 3200, 0.6);
-  const pickup = Math.max(1, Math.round(N * 0.18));
-  let idx = 0;
-  let prev = 0;
-  let apx = 0;
-  let apy = 0;
-  const tick = (u: number): number => {
-    const x = buf[idx];
-    const picked = electric ? x - 0.55 * buf[(idx - pickup + N) % N] : x;
-    const avg = (1 - s) * x + s * prev;
-    prev = x;
-    const ap = C * avg + apx - C * apy;
-    apx = avg;
-    apy = ap;
-    buf[idx] = ap * (u < d ? loss : muted);
-    idx = idx + 1 < N ? idx + 1 : 0;
-    return body ? body.run(picked) : picked;
+  const len = Math.min(t0 * 0.85, m.maxLen, d + 0.4);
+  // the second polarization's beats and two-stage decay take seconds to show: short notes skip it
+  const [share, cents, ratio] = len > 1 ? m.pol : [0, 0, 1];
+  // detuned about f, so the pitch the two average to is f
+  const A = new Loop(sr, f * 2 ** ((-share * cents) / 1200), t0, m.t4k);
+  const B = share ? new Loop(sr, f * 2 ** (((1 - share) * cents) / 1200), ratio * t0, ratio * m.t4k) : null;
+  const { pluck, knock } = excitation(b, e, m, f);
+  const fade = 0.25 * len;
+  const tick = (j: number, t: number): number => {
+    const x = j < pluck.length ? pluck[j] : 0;
+    const held = t < d;
+    let y = A.tick((1 - share) * x, held) + (j < knock.length ? knock[j] : 0);
+    if (B) y += B.tick(share * x, held);
+    return t > len - fade ? (y * (len - t)) / fade : y;
   };
-  const len = Math.min(t60 * 1.1, d + 0.4);
   if (e.k === 'overdrive') {
     // dry into the amp bus; the amp in the master adds drive, cabinet and room
     const i0 = Math.round(e.t * sr);
     const n = Math.min(b.n - i0, Math.round(len * sr));
-    for (let j = 0; j < n; j++) b.AMP[i0 + j] += tick(j / sr) * e.v * Math.min(1, (n - j) / (0.01 * sr));
+    for (let j = 0; j < n; j++) b.AMP[i0 + j] += tick(j, j / sr) * e.v * m.gain * Math.min(1, (n - j) / (0.01 * sr));
     b.ampUsed = true;
     return;
   }
-  const g = e.v * (harp ? 0.95 : electric ? 0.8 : 1.1);
+  const g = e.v * m.gain;
   b.voice(
     e.t,
     len,
-    (_j, u) => tick(u) * g,
+    (j, t) => tick(j, t) * g,
     e.p ?? Math.max(-0.5, Math.min(0.5, (e.n - 62) / 28)),
-    harp ? 0.4 : 0.22,
-    harp ? 0.15 : electric ? 0.3 : 0.12,
+    e.k === 'harp' ? 0.4 : 0.22,
+    e.k === 'harp' ? 0.15 : e.k === 'electric' ? 0.3 : 0.12,
     0.3,
   );
 }

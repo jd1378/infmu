@@ -6,9 +6,9 @@ import { type Ev, isMelody, type Mix, type Score } from '../types.ts';
 import { Bus } from './bus.ts';
 import { freeverb, lufs, SVF, TAU } from './dsp.ts';
 import * as I from './instruments.ts';
-import { mallet, perc, piano } from './modal.ts';
+import { bell, mallet, perc, piano } from './modal.ts';
 import { string } from './strings.ts';
-import { acid, choir, wind } from './voice.ts';
+import { acid, brassLead, choir, wind } from './voice.ts';
 
 export interface Rendered {
   left: Float32Array;
@@ -30,11 +30,11 @@ const PLAY: { [K in Ev['i']]?: (b: Bus, e: E<K>) => void } = {
   tom: I.tom,
   hat: I.hat,
   bass: I.bass,
-  pad: (b, e) => I.pad(b, e),
+  pad: (b, e) => (e.k === 'strings' ? I.strings(b, e) : I.pad(b, e)),
   keys: I.keys,
   pluck: I.pluck,
-  lead: I.lead,
-  bell: I.bell,
+  lead: (b, e) => (e.k === 'brass' ? brassLead(b, e) : I.lead(b, e)),
+  bell,
   organ: I.organ,
   impact: I.impact,
   rise: I.riser,
@@ -94,7 +94,12 @@ function playAll(b: Bus, events: readonly Ev[]): void {
     const play = PLAY[e.i] as ((b: Bus, e: Ev) => void) | undefined;
     play?.(b, e);
   }
-  if (b.ampUsed) amp(b);
+  if (b.ampUsed) {
+    amp(b);
+    // processed: a later playAll on this bus (the fx after the bed) must not run it again
+    b.AMP.fill(0);
+    b.ampUsed = false;
+  }
 }
 
 /** Side-to-mid ratio the bed is opened up to (stereo-recorded instruments in a room sit around 0.5 to 0.7). */
@@ -289,25 +294,33 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
 }
 
 /**
- * The guitar amp: a high-pass (no flub), a pre-emphasis so the drive bites in the mids, asymmetric soft
- * clipping, then a speaker cabinet (a low-pass near 4.5 kHz with a presence bump) and a doubled, slightly
- * delayed copy on the other side for width.
+ * The guitar amp: a high-pass (no flub) and a pre-emphasis so the drive bites in the mids, then hard, slightly
+ * asymmetric clipping that holds a note up the way a real amp's compression does, a mid scoop (the tone stack),
+ * and a speaker cabinet: 24 dB/oct above 8 kHz with a presence peak near 3.5 kHz. A doubled, slightly delayed
+ * copy on the other side gives width.
  */
 function amp(b: Bus): void {
   const { sr, n, AMP, ML, MR, REV, DLY } = b;
   const hp = new SVF(sr, 110, 0.7);
   const pre = new SVF(sr, 900, 0.7);
-  const cab = new SVF(sr, 4500, 0.9);
-  const presence = new SVF(sr, 2400, 1.4);
+  const scoop = new SVF(sr, 550, 0.6);
+  const cab1 = new SVF(sr, 8000, 0.54);
+  const cab2 = new SVF(sr, 8000, 1.31);
+  const presence = new SVF(sr, 3500, 1.2);
   const dbl = Math.round(0.013 * sr);
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    hp.run(AMP[i]);
+    // a tiny alternating offset keeps the filters out of subnormal numbers in the silences between notes, where
+    // tanh(x + 0.3) - tanh(0.3) rounds to exactly 0 and the states decay toward 0 (30x slower on x86)
+    hp.run(AMP[i] + (i & 1 ? 1e-15 : -1e-15));
     pre.run(hp.hp);
     const x = hp.hp + 1.5 * pre.bp;
-    const clipped = Math.tanh(6 * x + 0.3) - Math.tanh(0.3);
-    presence.run(clipped);
-    out[i] = (cab.run(clipped) + 0.35 * presence.bp) * 0.14;
+    const clipped = Math.tanh(16 * x + 0.3) - Math.tanh(0.3);
+    scoop.run(clipped);
+    // the scoop's band-pass peaks at Q: take 80% of the band out around 550 Hz (-14 dB)
+    const toned = clipped - (0.8 * scoop.bp) / 0.6;
+    presence.run(toned);
+    out[i] = (cab2.run(cab1.run(toned)) + (0.5 * presence.bp) / 1.2) * 0.4;
   }
   for (let i = 0; i < n; i++) {
     const d = 1 - 0.3 * (1 - b.duck[i]);

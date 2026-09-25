@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertNotEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v2/compose/index.ts';
-import { sectionKey } from '../../../src/engines/v2/compose/context.ts';
+import { Ctx, sectionKey } from '../../../src/engines/v2/compose/context.ts';
 import { Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS } from '../../../src/engines/v2/styles.ts';
 import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
@@ -164,8 +164,13 @@ Deno.test('the melody sits a set distance under the band, however dense the band
   for (const style of ['pulse', 'haze', 'drift'] as const) {
     const song = new Song(`ride-${style}`, [style]);
     for (let i = 0; i < 40 && checked < 6; i++) {
-      const s = composeSection(song, i);
-      if (!s.events.some(isMelody) || s.section.energy > 0.7) continue; // loud parts reach the compressor
+      const composed = composeSection(song, i);
+      // the ride works on the dry signal: measure it dry (no room, no echoes); loud parts reach the compressor
+      const s = {
+        ...composed,
+        movement: { ...composed.movement, mix: { ...composed.movement.mix, reverb: 0, delayWet: 0 } },
+      };
+      if (!s.events.some(isMelody) || s.section.energy > 0.7) continue;
       const band = { ...s, events: s.events.filter((e) => !isMelody(e)) };
       const [bl, br] = raw(band);
       const [fl, fr] = raw(s);
@@ -237,4 +242,60 @@ Deno.test('the concert pitch retunes every note', () => {
     for (let i = sr * 0.5 + 1; i < sr * 1.5; i++) if (r.left[i - 1] < 0 && r.left[i] >= 0) crossings++;
     assert(Math.abs(crossings - a4 / 2) <= 2, `A3 at A4 = ${a4} Hz sounds at about ${crossings} Hz`);
   }
+});
+
+Deno.test('pieces of one style groove differently', () => {
+  // every drum, percussion and bass hit of the first chorus or drop's first bar, on a 16th grid
+  const groove = (s: ReturnType<typeof composeSection>) => {
+    const s16 = 60 / s.bpm / 4;
+    const lanes = new Map<string, string[]>();
+    for (const e of s.events) {
+      if (!['kick', 'snare', 'hat', 'perc', 'tom', 'bass'].includes(e.i) || e.t >= 16 * s16) continue;
+      const lane = `${e.i}:${'k' in e ? e.k : ''}`;
+      const cells = lanes.get(lane) ?? Array(16).fill('.');
+      cells[Math.round(e.t / s16)] = 'x';
+      lanes.set(lane, cells);
+    }
+    return [...lanes.entries()].sort().map(([k, v]) => `${k}=${v.join('')}`).join('|');
+  };
+  for (const style of ['rise', 'acid', 'pulse', 'haze', 'garden', 'ember', 'cathedral'] as const) {
+    const grooves = new Set<string>();
+    for (let seed = 0; seed < 10; seed++) {
+      const song = new Song(`groove-${style}-${seed}`, [style]);
+      const mv = song.movement(0);
+      const k = mv.sections.findIndex((s) => s.role === 'chorus' || s.role === 'drop');
+      if (k >= 0) grooves.add(groove(composeSection(song, mv.firstSection + k)));
+    }
+    assert(grooves.size >= 3, `${style}: only ${grooves.size} different grooves in 10 pieces`);
+  }
+});
+
+Deno.test('a part counts its returns, not its sections', () => {
+  let runs = 0;
+  for (let seed = 0; seed < 20; seed++) {
+    const song = new Song(`turns-${seed}`);
+    const mv = song.movement(0);
+    const turns = new Map<string, number>();
+    mv.sections.forEach((sec, k) => {
+      const ctx = new Ctx(song, mv.firstSection + k);
+      const prev = mv.sections[k - 1];
+      if (prev?.role === sec.role) {
+        // the same run continues: same turn, one further in
+        const before = new Ctx(song, mv.firstSection + k - 1);
+        assertEquals(ctx.turn, before.turn);
+        assertEquals(ctx.inRun, before.inRun + 1);
+        assert(!before.runEnd);
+        runs++;
+      } else {
+        assertEquals(ctx.inRun, 0);
+        assertEquals(ctx.turn, turns.get(sec.role) ?? 0);
+        turns.set(sec.role, ctx.turn + 1);
+      }
+      const later = mv.sections.slice(k + 1).some((s, j) =>
+        s.role === sec.role && mv.sections[k + j]?.role !== sec.role
+      );
+      assertEquals(ctx.finalTurn, !later);
+    });
+  }
+  assert(runs > 5, `only ${runs} continued runs`);
 });

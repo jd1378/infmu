@@ -201,3 +201,19 @@ export function lufs(sr: number, l: Float32Array, r: Float32Array, end = l.lengt
   const loud = blocks.filter((x) => lk(x) > gate);
   return loud.length ? lk(mean(loud)) : -Infinity;
 }
+/** Slow random wander: uniform white noise through two one-poles with coefficient k, scaled to unit rms. */
+export class Wander {
+  private a = 0;
+  private b = 0;
+  private readonly norm: number;
+  constructor(private readonly k: number) {
+    // noise power gain of k^2 / (1 - (1 - k) z^-1)^2, for input variance 1/3
+    const p = 1 - k;
+    this.norm = 1 / Math.sqrt((k ** 4 * (1 + p * p)) / (3 * (1 - p * p) ** 3));
+  }
+  next(white: number): number {
+    this.a += (white - this.a) * this.k;
+    this.b += (this.a - this.b) * this.k;
+    return this.b * this.norm;
+  }
+}

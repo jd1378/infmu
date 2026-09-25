@@ -4,10 +4,11 @@
 
 import type { Ev, KickKind, LeadKind, PadKind, RiseKind } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { freeverb, pan, saw, smooth, SVF, TAU } from './dsp.ts';
+import { freeverb, pan, saw, smooth, SVF, TAU, Wander } from './dsp.ts';
+import { Modes } from './modal.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
-const { exp, sin, tanh, min, max, sqrt, round, PI } = Math;
+const { exp, sin, tanh, min, max, sqrt, round, pow, PI } = Math;
 /** Release: -60 dB, r samples after note-off at sample `on`. */
 const fall = (j: number, on: number, r: number) => (j > on ? exp((-6.9 * (j - on)) / r) : 1);
 
@@ -185,13 +186,13 @@ export function hat(b: Bus, e: E<'hat'>): void {
     e.t,
     open ? 0.131 : 0.14,
     () => {
-      const hp = new SVF(b.sr, sh ? 5500 : dusty ? 6000 : 7200, 0.9);
-      const lpf = dusty ? 7000 : 12000;
+      const hp = new SVF(b.sr, sh ? 5000 : dusty ? 5500 : 6500, 0.9);
+      const lpf = dusty ? 6500 : 9500;
       const lp = [new SVF(b.sr, lpf), new SVF(b.sr, lpf)];
       const ph = METAL.map(() => b.noise.unit());
-      const dec = open ? 10 : sh ? 40 : dusty ? 26 : 32;
+      const dec = open ? 13 : sh ? 40 : dusty ? 26 : 32;
       const att = sh ? 0.007 : 0.0025;
-      const g = sh ? 0.45 : dusty ? 0.42 : 0.5;
+      const g = sh ? 0.28 : dusty ? 0.28 : 0.32;
       return (_j, u) => {
         let m = 0;
         if (!sh) {
@@ -337,33 +338,41 @@ export function pluck(b: Bus, e: E<'pluck'>): void {
 }
 
 /**
- * Electric piano: two-operator FM at 1:1 (the tone bar), a 14x partial for the tine's bark, velocity opens
- * the brightness. Chords are strummed a few ms apart and the tremolo pans slowly.
+ * Electric piano after a Rhodes (Freesound tim.kahn Mark II, CC BY 4.0, measured): the tine is nearly a sine
+ * with a long decay; the pickup's nonlinearity turns it into the familiar tone: a second and third harmonic
+ * about 15 and 25 dB down at mf that fade two and three times faster than the fundamental (they go as its
+ * square and cube), more of them the harder the key is struck (the bark). A faint inharmonic tine ping near
+ * 7.5x rings for a moment.
  */
 export function keys(b: Bus, e: E<'keys'>): void {
   const notes = e.n.slice().sort((x, y) => x - y);
-  const g = (0.26 * e.v) / sqrt(notes.length);
+  const v = min(1, max(0.05, e.v));
+  const g = (0.22 * v) / sqrt(notes.length);
   const rel = 0.22;
+  const d = 0.3 + 0.85 * v; // how far the tine swings past the pickup
   notes.forEach((m, k) => {
     const f = b.hz(m);
     const t0 = e.t + k * 0.009;
-    const idx = 0.7 + 1.6 * e.v;
-    let pc = 0;
-    let pt = 0;
-    const lp = new SVF(b.sr, 3200 + 2200 * e.v, 0.6);
+    const t60 = min(18, 16 * pow(262 / f, 0.35));
+    const fall = exp(-6.907755 / (t60 * b.sr));
+    const ping = new Modes(1);
+    ping.add(f * 7.5, 0.03 * v, 0.15, b.sr);
+    const done = exp(-1 / (rel * b.sr));
+    let a = d;
+    let ph = 0;
+    let damper = 1;
     b.voice(
       t0,
-      e.d + rel,
+      e.d + rel * 5,
       (_j, u) => {
-        const inc = (f * b.wow(t0 + u)) / b.sr;
-        pc += inc;
-        pt += 14 * inc;
-        const I = idx * exp(-2.8 * u) + 0.3;
-        const car = sin(TAU * pc + I * sin(TAU * pc));
-        const tine = sin(TAU * pt) * exp(-35 * u) * 0.14 * e.v;
-        const env = min(1, u / 0.002) * (0.55 + 0.45 * exp(-1.6 * u)) * exp(-0.3 * u) *
-          (u > e.d ? exp((-6.9 * (u - e.d)) / rel) : 1);
-        return lp.run(car + tine) * env * g * (1 + 0.1 * sin(TAU * 4.2 * (t0 + u)));
+        ph += (f * b.wow(t0 + u)) / b.sr;
+        if (ph >= 1) ph -= 1;
+        const x = sin(TAU * ph) * a;
+        a *= fall;
+        // asymmetric soft pickup curve: x + 0.4 x^2 - 0.3 x^3 (less the square's mean, so no DC)
+        const y = (x + 0.4 * (x * x - 0.5 * a * a) - 0.3 * x * x * x) / d + ping.next();
+        if (u > e.d) damper *= done;
+        return y * damper * g * (1 + 0.1 * sin(TAU * 4.2 * (t0 + u)));
       },
       max(-0.5, min(0.5, (m - 62) / 30)),
       0.28,
@@ -666,43 +675,6 @@ export function lead(b: Bus, e: E<'lead'>): void {
   }
 }
 
-/**
- * Bell: two-operator FM. With the default 3.4 ratio the loudest inharmonic partial sits at 2.4x, a minor
- * tenth up, like the "tierce" of a cast church bell. The index decays faster than the loudness.
- */
-export function bell(b: Bus, e: E<'bell'>): void {
-  const ratio = b.tone.fmRatio;
-  e.n.forEach((m, k) => {
-    const wc = (TAU * b.hz(m)) / b.sr;
-    // the index and the loudness decay as running gains (one multiply a sample instead of exp())
-    const fi = exp(-3 / b.sr);
-    const fa = exp(-0.8 / b.sr);
-    let index = 1.4;
-    let amp = e.v * [0.15, 0.09, 0.045][k % 3];
-    // the modulator is a plain sine: computed by recurrence (y[n] = 2cos(w)·y[n-1] - y[n-2])
-    const wm = ratio * wc;
-    const km = 2 * Math.cos(wm);
-    let m1 = Math.sin(-wm);
-    let m2 = Math.sin(-2 * wm);
-    b.voice(
-      e.t,
-      5.75, // until the bell is 40 dB down
-      (j, u) => {
-        const mod = km * m1 - m2;
-        m2 = m1;
-        m1 = mod;
-        const y = sin(wc * j + (0.3 + index) * mod) * amp * min(1, u / 0.002);
-        index *= fi;
-        amp *= fa;
-        return y;
-      },
-      [-0.3, 0.3, 0][k % 3],
-      0.5,
-      0.15,
-    );
-  });
-}
-
 // ------------------------------------------------------------------ transitions and textures
 
 // Impact: a boom (a sine falling onto D1) + a noise crash that closes down + a chord stab that bypasses the
@@ -902,4 +874,87 @@ export function sidechain(b: Bus, kicks: E<'kick'>[]): Float32Array {
     }
   }
   return G;
+}
+
+// ------------------------------------------------------------------ strings pad
+
+/**
+ * The 'strings' pad as a section: five saws a note as before, but each player bows with their own vibrato rate
+ * (4.8-6 Hz, 12 cents; the section average measures ~5 cents) and pitch wander; bow noise under the tone (a
+ * recorded violin section sits ~30 dB under its harmonics below 2 kHz); the violin body's bridge hill (+6 dB near
+ * 2.5 kHz) after the low-pass, so high notes keep their 2-4 kHz edge; and a 0.35 s onset (sections: 0.16-0.29 s).
+ */
+export function strings(b: Bus, e: E<'pad'>): void {
+  const nv = 5;
+  const det = 14 * b.tone.detune;
+  const sr = b.sr;
+  const V: { ph: number; inc: number; l: number; r: number; lfo: number; rate: number; w: Wander }[] = [];
+  const g = (0.116 * (e.g || 1)) / sqrt(nv);
+  const kw = 1 - exp((-TAU * 1.2 * 32) / sr);
+  e.n.forEach((m, k) => {
+    for (let j = 0; j < nv; j++) {
+      const x = (2 * j) / (nv - 1) - 1;
+      const [a, bb] = pan(x * 0.9 * (k % 2 ? -1 : 1));
+      V.push({
+        ph: b.noise.unit(),
+        inc: (b.hz(m) * 2 ** ((x * det) / 1200)) / sr,
+        l: a * g,
+        r: bb * g,
+        lfo: TAU * b.noise.unit(),
+        rate: 4.8 + 1.2 * b.noise.unit(),
+        w: new Wander(kw),
+      });
+    }
+  });
+  const [c0, c1] = e.cut;
+  const F = [c0, c0, 180, 180].map((c, k) => new SVF(sr, c, k < 2 ? 0.6 : 0.707));
+  const hill = [new SVF(sr, 2500, 1), new SVF(sr, 2500, 1)];
+  const bow = [new SVF(sr, 1800, 0.3), new SVF(sr, 1800, 0.3)];
+  // the low-pass opens for high chords: a violin section's E5 keeps its harmonics flat to ~3.3 kHz
+  const track = min(2, max(1, (b.hz(max(...e.n)) / 392) ** 0.7));
+  const i0 = round(e.t * sr);
+  const on = e.d * sr;
+  const rel = (e.rel || 1.4) * sr;
+  const len = min(b.ML.length - i0, round(on + rel));
+  const cur = V.map((v) => v.inc);
+  for (let j = 0; j < len; j++) {
+    if ((j & 31) === 0) {
+      const c = c0 * (c1 / c0) ** min(1, j / on) * track;
+      F[0].set(c);
+      F[1].set(c);
+      const t = j / sr;
+      const depth = 12 * smooth((t - 0.2) / 0.8);
+      for (let k = 0; k < V.length; k++) {
+        const v = V[k];
+        cur[k] = v.inc * 2 ** ((depth * sin(TAU * v.rate * t + v.lfo) + 4 * v.w.next(b.noise.next())) / 1200);
+      }
+    }
+    let sl = 0;
+    let sr_ = 0;
+    for (let k = 0; k < V.length; k++) {
+      const v = V[k];
+      let p = v.ph + cur[k];
+      if (p >= 1) p -= 1;
+      v.ph = p;
+      const s = saw(p, cur[k]);
+      sl += s * v.l;
+      sr_ += s * v.r;
+    }
+    // bow noise: rosin on the strings, a broad band around 1.8 kHz, as loud as the section is
+    bow[0].run(b.noise.next());
+    bow[1].run(b.noise.next());
+    const nz = 0.06 * g * sqrt(e.n.length * nv);
+    F[2].run(F[0].run(sl + bow[0].bp * nz));
+    F[3].run(F[1].run(sr_ + bow[1].bp * nz));
+    hill[0].run(F[2].hp);
+    hill[1].run(F[3].hp);
+    const yl = F[2].hp + hill[0].bp;
+    const yr = F[3].hp + hill[1].bp;
+    const i = i0 + j;
+    const env = smooth(j / (0.35 * sr)) * (j > on ? exp((-6.9 * (j - on)) / rel) : 1);
+    const d = env * b.duck[i];
+    b.ML[i] += yl * d;
+    b.MR[i] += yr * d;
+    b.REV[i] += (yl + yr) * env * 0.45;
+  }
 }

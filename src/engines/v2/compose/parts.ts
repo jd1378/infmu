@@ -24,6 +24,8 @@ export interface DrumKit {
   sc?: number;
   /** Level of hats and shakers relative to the rest of the kit. */
   hats?: number;
+  /** The backbeat (snare, clap, rim) this fraction of a 16th behind the grid: a lazy, lo-fi feel. */
+  lag?: number;
 }
 
 export interface DrumBar {
@@ -49,7 +51,13 @@ export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1)
   if (p.snare) {
     grid(
       p.snare,
-      (s, v) => ctx.push({ i: 'snare', t: human(s), v: v * gain * (0.94 + 0.06 * r.next()), k: kit.snare ?? 'big' }),
+      (s, v) =>
+        ctx.push({
+          i: 'snare',
+          t: human(s) + (kit.lag ?? 0) * ctx.s16,
+          v: v * gain * (0.94 + 0.06 * r.next()),
+          k: kit.snare ?? 'big',
+        }),
     );
   }
   const hg = gain * (kit.hats ?? 1);
@@ -155,19 +163,7 @@ export function bassFigure(ctx: Ctx, bar: number, hits: readonly BassHit[], k: B
   }
 }
 
-// Rolling bass under a four-on-the-floor kick: the kick owns each beat's first 16th, the bass plays 16ths 2-4,
-// written here as intervals above the root per beat.
-const rolling = (beats: number[][]): BassHit[] =>
-  beats.flatMap((ivs, b) => ivs.map((iv, j): BassHit => [b * 4 + j + 1, 1, iv, [0.8, 1, 0.6][j]]));
-export const ROLLING: readonly BassHit[][] = [
-  rolling([[12, 0, 0], [0, 0, 12], [12, 0, 0], [12, 0, 7]]),
-  rolling([[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 12, 0]]),
-];
-export const OFFBEAT: readonly BassHit[] = [[2, 2, 0, 1], [6, 2, 0, 1], [10, 2, 0, 1], [14, 2, 0, 1]];
 export const EIGHTHS: readonly BassHit[] = [0, 2, 4, 6, 8, 10, 12, 14].map((s) => [s, 2, 0, s % 4 ? 0.8 : 1] as const);
-export const OCTAVES: readonly BassHit[] = [0, 2, 4, 6, 8, 10, 12, 14].map((s) =>
-  [s, 2, s % 4 === 2 ? 12 : 0, s % 4 ? 0.8 : 1] as const
-);
 
 // ------------------------------------------------------------------ chords
 
@@ -448,11 +444,27 @@ export const crash = (ctx: Ctx, bar = 0, v = 0.8) => ctx.push({ i: 'perc', t: ct
  * An acid pattern for the movement: sixteen steps of notes drawn from the key's darker degrees (root, octave,
  * minor third, fifth, seventh), with rests, accents and slides placed where the groove wants them.
  */
-export function acidPattern(rng: Rng): { deg: number; oct: number; on: boolean; accent: boolean; slide: boolean }[] {
+/**
+ * A 303 pattern: pitches drawn from the movement's stream; the rhythm (notes, accents, slides, octave jumps)
+ * also drawn, or fixed by the movement's groove when it has one.
+ */
+export function acidPattern(
+  rng: Rng,
+  rhythm?: { notes: string; slide: string; up: string },
+): { deg: number; oct: number; on: boolean; accent: boolean; slide: boolean }[] {
   const pool: readonly (readonly [number, number])[] = [[0, 6], [0, 6], [2, 2], [4, 2], [6, 1.5], [7, 2], [1, 0.6], [
     3,
     0.8,
   ]];
+  if (rhythm) {
+    return Array.from({ length: 16 }, (_, s) => ({
+      deg: rng.weighted(pool),
+      oct: rhythm.up[s] === '.' ? 0 : 1,
+      on: rhythm.notes[s] !== '.',
+      accent: rhythm.notes[s] === 'x',
+      slide: rhythm.slide[s] !== '.',
+    }));
+  }
   return Array.from({ length: 16 }, (_, s) => ({
     deg: rng.weighted(pool),
     oct: rng.chance(s % 4 === 2 ? 0.35 : 0.15) ? 1 : 0,

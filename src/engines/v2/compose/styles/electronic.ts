@@ -1,6 +1,7 @@
 // Rise (trance), Pulse (synthwave) and Acid (acid house).
 
 import type { Ctx } from '../context.ts';
+import { ACID, grooveFor, playGroove, PULSE, RISE } from '../grooves.ts';
 import {
   choir,
   chorusMelody,
@@ -27,13 +28,9 @@ import {
   cymbalInto,
   drums,
   EIGHTHS,
-  OCTAVES,
-  OFFBEAT,
   padChords,
-  percBar,
   pick,
   roll,
-  ROLLING,
   runRiser,
   runRoll,
   stab,
@@ -46,9 +43,11 @@ import {
 export function rise(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx, 0.75);
+  const { a: hook, b: hookB } = motifs(ctx);
   const shape = mrng.fork('arp').pick<ArpShape>(['hemi', 'hemi', 'updown', 'broken']);
-  const rolling = mrng.fork('bass').pick(ROLLING);
+  const g = grooveFor(ctx, RISE);
+  const verseKit = { kit: { kick: 'big', snare: 'clap', sc: 0.45 }, bass: 'saw', bassGain: 0.45 } as const;
+  const dropKit = { kit: { kick: 'drop', snare: 'clap', sc: 0.72 }, bass: 'saw', bassGain: 1 } as const;
   const acidOn = mrng.fork('acid-on').chance(0.3);
   const pattern = acidPattern(mrng.fork('acid'));
   const first = ctx.chords[0];
@@ -81,16 +80,10 @@ export function rise(ctx: Ctx): void {
     case 'verse':
       padChords(ctx, 'wide', { cut: () => [2600, 4200], g: 0.62 });
       for (let b = 0; b < bars; b++) {
-        drums(ctx, b, {
-          kick: 'x...x...x...x...',
-          snare: b >= 2 ? '....o.......o...' : undefined,
-          hat: '--.---.---.---.-',
-          open: '..o...o...o...o.',
-        }, { kick: 'big', snare: 'clap', sc: 0.45 });
-        bassFigure(ctx, b, OFFBEAT, 'saw', 0.45);
+        playGroove(ctx, g, b, verseKit);
         arp(ctx, b, shape, { v: 0.62, cut: () => 2400 });
       }
-      if (ctx.occ) {
+      if (ctx.returning) {
         sing(ctx, 'brass', hook, { center: 1, lo: -3, hi: 6, transpose: -12, velocity: 0.8 }, {
           from: half,
           bars: half,
@@ -103,7 +96,7 @@ export function rise(ctx: Ctx): void {
       for (let b = 0; b < bars; b++) {
         const lastBar = ctx.runBar(b) === ctx.runBars - 1;
         drums(ctx, b, { kick: lastBar ? 'x.x.x.x.x.x.x.x.' : 'x...x...x...x...' }, { kick: 'big', sc: 0.45 });
-        bassFigure(ctx, b, lastBar ? EIGHTHS : OFFBEAT, 'saw', 0.38 + 0.1 * ctx.runAt(b / bars));
+        bassFigure(ctx, b, lastBar ? EIGHTHS : g.bassLight, 'saw', 0.38 + 0.1 * ctx.runAt(b / bars));
         arp(ctx, b, shape, { v: 0.7, cut: (x) => 700 * 2 ** (2.8 * ctx.runAt(x)) });
       }
       runRoll(ctx, 0.35, 0.85);
@@ -115,26 +108,22 @@ export function rise(ctx: Ctx): void {
       }
       break;
     case 'drop': {
-      if (!ctx.occ || ctx.prevRole !== 'drop') {
+      if (ctx.inRun === 0) {
         ctx.push({ i: 'impact', t: 0, k: 'drop', a: 1, n: stab(first) }, { i: 'snare', t: 0, v: 0.75, k: 'huge' });
         crash(ctx);
       }
       padChords(ctx, 'drop', { cut: () => [8000, 8000] });
       const fill = ctx.nextRole !== 'drop';
       for (let b = 0; b < bars; b++) {
-        const f = fill && b === last;
-        drums(ctx, b, {
-          kick: f ? 'x...x...x.......' : 'x...x...x...x...',
-          snare: f ? '....x...........' : '....x.......x...',
-          hat: 'xo.xxo.xxo.xxo.x',
-          open: '..x...x...x...x.',
-        }, { kick: 'drop', snare: 'clap', sc: 0.72 });
-        if (ctx.occ % 2) percBar(ctx, b, { ride: 'x...x...x...x...' }, 0.7);
-        bassFigure(ctx, b, f ? rolling.filter(([s]) => s < 12) : rolling, 'roll', 1);
+        if (fill && b === last) {
+          // the last beat drops out before the next part, the roll alone carries into it
+          drums(ctx, b, { ...g.full, kick: 'x...x...x.......', snare: '....x...........' }, dropKit.kit);
+          bassFigure(ctx, b, g.bassFull.filter(([s]) => s < 12), g.bassKind ?? 'saw', 1);
+        } else playGroove(ctx, g, b, dropKit);
       }
       if (fill) roll(ctx, bars - 0.25, [[0.125, 2], [0.125, 4]], 0.5, 0.85);
       chorusMelody(ctx, 'hook', second, hook, { center: 3, lo: -1, hi: 10 });
-      if (acidOn && ctx.occ >= 2) acidLine(ctx, pattern, 0, bars, [700, 1800], 0.75, 0.8, false);
+      if (acidOn && ctx.peak) acidLine(ctx, pattern, 0, bars, [700, 1800], 0.75, 0.8, false);
       break;
     }
     case 'break':
@@ -164,12 +153,7 @@ export function rise(ctx: Ctx): void {
       // the outro winds down once, across all of its sections
       padChords(ctx, 'warm', { cut: (slot) => runCut(ctx, slot, 3000, 1400), g: 0.8, rel: 2 });
       for (let b = 0; b < runHalf(ctx); b++) {
-        drums(ctx, b, { kick: 'x...x...x...x...', snare: '....o.......o...', open: '..o...o...o...o.' }, {
-          kick: 'big',
-          snare: 'clap',
-          sc: 0.4,
-        });
-        bassFigure(ctx, b, OFFBEAT, 'saw', 0.4);
+        playGroove(ctx, g, b, { ...verseKit, bassGain: 0.4 });
       }
       sustainedBass(ctx, 'sub', 0.35, runHalf(ctx), bars, 2);
       for (let b = 0; b < bars; b++) {
@@ -195,26 +179,24 @@ const PULSE_LEADS: Voice[] = ['saw', 'wind:sax', 'string:electric', 'hook', 'bel
 export function pulse(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx, 0.6);
-  const counter = motifs(ctx, 0.3).b;
+  const { a: hook, b: hookB } = motifs(ctx);
+  const counter = motifs(ctx).b;
   const shape = mrng.fork('arp').pick<ArpShape>(['up', 'updown', 'broken']);
-  const kick = mrng.fork('kick').pick(['x.......x.x.....', 'x.......x.......', 'x.....x.x.......']);
   const kit = { kick: 'punch', snare: 'gated', sc: 0.35, hats: 0.65 } as const;
+  const g = grooveFor(ctx, PULSE);
+  const band = { kit, bass: 'pulse', bassGain: 0.5 } as const;
   const lead = voiceFrom(ctx, PULSE_LEADS);
   const second = voiceFrom(ctx, ['wind:sax', 'saw', 'string:overdrive', 'string:electric', 'bell'], lead);
   const guitar = mrng.fork('guitar').chance(0.5);
   const arps = (from: number, to: number, v: (b: number) => number, cut: (x: number) => number) => {
     for (let b = from; b < to; b++) arp(ctx, b, shape, { v: v(b), cut, from: 57, dec: 0.75 });
   };
-  const chorusDrums = (b: number, f: boolean) => {
-    drums(ctx, b, {
-      kick: 'x...x...x...x...',
-      snare: f ? '....x.......' : '....x.......x...',
-      hat: 'x-o-x-o-x-o-x-o-',
-      open: '..............o.',
-    }, kit);
-    percBar(ctx, b, { ride: 'o...o...o...o...' }, 0.5);
-    if (f) tomFill(ctx, b, ctx.chordAt(b));
+  // the chorus groove; a last bar before a new part hands over to a tom fill
+  const chorusBar = (b: number, f: boolean, bassGain: number) => {
+    if (!f) return playGroove(ctx, g, b, { ...band, bassGain });
+    drums(ctx, b, { ...g.full, snare: '....x...........' }, { ...kit, ...g.kit });
+    tomFill(ctx, b, ctx.chordAt(b));
+    bassFigure(ctx, b, g.bassFull.filter(([s]) => s < 12), g.bassKind ?? 'pulse', bassGain);
   };
 
   if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'soft', a: 0.7, n: stab(ctx.chords[0]) });
@@ -224,15 +206,14 @@ export function pulse(ctx: Ctx): void {
       padChords(ctx, 'warm', { cut: (_, i) => [900 + 250 * i, 1200 + 300 * i], g: 0.8 });
       sustainedBass(ctx, 'sub', 0.36);
       arps(0, bars, () => 0.7, (x) => 600 * 2 ** (1.8 * x));
-      for (let b = half; b < bars; b++) drums(ctx, b, { hat: 'x.o.x.o.x.o.x.o.' }, kit, 0.6);
+      for (let b = half; b < bars; b++) drums(ctx, b, { hat: g.light.hat ?? 'x.o.x.o.x.o.x.o.' }, kit, 0.6);
       break;
     case 'verse':
       padChords(ctx, 'wide', { cut: () => [1800, 2400], g: 0.45 });
       arps(0, bars, () => 0.6, () => 1600);
       for (let b = 0; b < bars; b++) {
-        drums(ctx, b, { kick, snare: '....x.......x...', hat: 'x.o.x.o.x.o.x.o.' }, kit);
-        bassFigure(ctx, b, EIGHTHS, 'pulse', 0.5);
-        if (guitar && ctx.occ) pick(ctx, b, 'electric', [3, 4, 5, 4], 2, 0.5, 52);
+        playGroove(ctx, g, b, band);
+        if (guitar && ctx.returning) pick(ctx, b, 'electric', [3, 4, 5, 4], 2, 0.5, 52);
       }
       if (bars >= 8) {
         sing(ctx, 'brass', counter, { center: 1, lo: -3, hi: 6, transpose: -12, velocity: 0.8 }, {
@@ -245,8 +226,11 @@ export function pulse(ctx: Ctx): void {
       padChords(ctx, 'wide', { cut: (_, i) => [1600 + 900 * i, 2400 + 1200 * i], g: 0.5 });
       arps(0, bars, (b) => 0.5 + 0.1 * b, (x) => 1200 * 2 ** x);
       for (let b = 0; b < bars; b++) {
-        drums(ctx, b, { kick: b < last ? kick : 'x.......', hat: 'x.o.x.o.x.o.x.o.' }, kit);
-        bassFigure(ctx, b, OCTAVES, 'pulse', 0.5);
+        if (b < last) playGroove(ctx, g, b, band);
+        else {
+          drums(ctx, b, { kick: 'x...............', hat: g.light.hat }, kit);
+          bassFigure(ctx, b, g.bassFull, 'pulse', 0.5);
+        }
       }
       roll(ctx, last, [[1, 8]], 0.4, 0.8, 'gated');
       if (mrng.fork('pre-stop').chance(0.6)) stopBefore(ctx, 1);
@@ -256,8 +240,7 @@ export function pulse(ctx: Ctx): void {
       padChords(ctx, 'wide', { cut: () => [2800, 4200], g: 0.55 });
       arps(0, bars, () => 0.5, () => 2400);
       for (let b = 0; b < bars; b++) {
-        chorusDrums(b, b === last && bars >= 8);
-        bassFigure(ctx, b, OCTAVES, 'pulse', 0.55);
+        chorusBar(b, b === last && bars >= 8, 0.55);
         if (guitar) pick(ctx, b, 'electric', [2, 3, 4, 5, 4, 3], 2, 0.45, 52);
       }
       chorusMelody(ctx, lead, second, hook, { center: 2, lo: -2, hi: 9 });
@@ -266,10 +249,9 @@ export function pulse(ctx: Ctx): void {
       padChords(ctx, 'wide', { cut: () => [2400, 3600], g: 0.5 });
       arps(0, bars, () => 0.4, () => 2000);
       for (let b = 0; b < bars; b++) {
-        chorusDrums(b, b === last);
-        bassFigure(ctx, b, OCTAVES, 'pulse', 0.5);
+        chorusBar(b, b === last, 0.5);
       }
-      solo(ctx, second, { center: second === 'string:overdrive' ? -2 : 1, lo: -5, hi: 9 });
+      solo(ctx, second, hook, { center: second === 'string:overdrive' ? -2 : 1, lo: -5, hi: 9 });
       break;
     case 'bridge':
       padChords(ctx, 'glass', { cut: () => [3000, 4000], g: 0.3, transpose: 12 });
@@ -297,8 +279,7 @@ export function pulse(ctx: Ctx): void {
       padChords(ctx, 'warm', { cut: (_, i) => [2200 - 200 * i, 1600 - 150 * i], g: 0.8, rel: 2 });
       arps(0, bars - 1, (b) => 0.6 * (1 - b / bars), () => 1400);
       for (let b = 0; b < half; b++) {
-        drums(ctx, b, { kick, snare: '....x.......x...', hat: 'x.o.x.o.x.o.x.o.' }, kit, 0.85);
-        bassFigure(ctx, b, EIGHTHS, 'pulse', 0.45);
+        playGroove(ctx, g, b, { ...band, gain: 0.85, bassGain: 0.45 });
       }
       sustainedBass(ctx, 'sub', 0.34, half, bars, 2);
   }
@@ -311,30 +292,17 @@ export function pulse(ctx: Ctx): void {
 export function acid(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half } = halves(ctx);
-  const pattern = acidPattern(mrng.fork('acid'));
+  // the groove fixes the 303's rhythm (notes, accents, slides, octave jumps); the pitches are the movement's own
+  const g = grooveFor(ctx, ACID);
+  const pattern = acidPattern(mrng.fork('acid'), g.acid);
   const square = mrng.fork('square').chance(0.35);
-  const cowbell = mrng.fork('cowbell').chance(0.45);
   const stabs = mrng.fork('stabs').chance(0.55);
   const kit = { kick: 'drop', snare: 'clap', sc: 0.55 } as const;
   // the 303 opens up over the movement: each return of a section is a little brighter and wetter
   const open = Math.min(1, ctx.local / Math.max(1, ctx.mv.sections.length - 2));
   const line = (from: number, n: number, c0: number, c1: number, res: number, env: number) =>
     acidLine(ctx, pattern, from, n, [c0 * (1 + open), c1 * (1 + 0.6 * open)], res, env, square);
-  const groove = (b: number, full: boolean) => {
-    drums(
-      ctx,
-      b,
-      {
-        kick: 'x...x...x...x...',
-        snare: full ? '....x.......x...' : undefined,
-        hat: full ? '-.-.-.-.-.-.-.-.' : undefined,
-        open: '..x...x...x...x.',
-      },
-      kit,
-      full ? 1 : 0.85,
-    );
-    if (full && cowbell) percBar(ctx, b, { cowbell: '...o..o....o..o.' }, 0.55);
-  };
+  const band = { kit, bass: 'sub', bassGain: 0.5 } as const;
 
   if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'soft', a: 0.6 });
 
@@ -360,9 +328,8 @@ export function acid(ctx: Ctx): void {
       break;
     }
     case 'verse':
-      for (let b = 0; b < bars; b++) groove(b, true);
+      for (let b = 0; b < bars; b++) playGroove(ctx, g, b, band);
       line(0, bars, 320, 900, 0.7, 0.75);
-      sustainedBass(ctx, 'sub', 0.25);
       break;
     case 'build':
       padChords(ctx, 'wide', { cut: (slot) => runCut(ctx, slot, 1500, 5000), g: 0.45 });
@@ -380,8 +347,7 @@ export function acid(ctx: Ctx): void {
         crash(ctx);
       }
       for (let b = 0; b < bars; b++) {
-        groove(b, true);
-        if (ctx.occ) percBar(ctx, b, { ride: 'x.x.x.x.x.x.x.x.' }, 0.45);
+        playGroove(ctx, g, b, band);
         if (stabs) {
           for (const s of [2, 6, 10, 14]) {
             ctx.push({
@@ -396,11 +362,12 @@ export function acid(ctx: Ctx): void {
           }
         }
       }
-      line(0, bars, 800, 2400, 0.85, 1.1);
+      // the 303 opens across the whole drop run, not again every 8 bars
+      line(0, bars, ...span(ctx, 800, 2400), 0.85, 1.1);
       if (ctx.nextRole !== 'drop') roll(ctx, bars - 0.25, [[0.125, 2], [0.125, 4]], 0.5, 0.85, 'clap');
       break;
     case 'solo':
-      for (let b = 0; b < bars; b++) groove(b, true);
+      for (let b = 0; b < bars; b++) playGroove(ctx, g, b, band);
       line(0, bars, 600, 5200, 0.95, 1.3);
       break;
     case 'break':

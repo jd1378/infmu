@@ -89,6 +89,14 @@ export class Ctx {
    */
   readonly runBars: number;
   readonly runStartBar: number;
+  /** Which time this part comes round: a chorus:8 chorus:8 is one chorus (turn 0), not two. */
+  readonly turn: number;
+  /** This section's place in its run: 0 for the first 8 bars of a 16-bar chorus, 1 for the second. */
+  readonly inRun: number;
+  /** The run ends with this section. */
+  readonly runEnd: boolean;
+  /** No later run of this role: the last chorus, the final drop. */
+  readonly finalTurn: boolean;
   /** MIDI of the tonic in the melody register, and in the bass register. */
   readonly tonicMid: number;
   readonly tonicLow: number;
@@ -126,10 +134,28 @@ export class Ctx {
     const barsOf = (a: number, b: number) => this.mv.sections.slice(a, b).reduce((n, x) => n + x.bars, 0);
     this.runStartBar = barsOf(first, this.local);
     this.runBars = barsOf(first, end + 1);
+    const secs = this.mv.sections;
+    this.inRun = this.local - first;
+    this.runEnd = this.local === end;
+    this.turn = secs.slice(0, first).filter((s, k) => s.role === this.sec.role && secs[k + 1].role !== s.role).length;
+    this.finalTurn = !secs.slice(end + 1).some((s) => s.role === this.sec.role);
     this.tonicMid = tonicNear(this.key, 72);
     this.tonicLow = tonicNear(this.key, 40);
     this.kickNote = [0, 7].map((iv) => 28 + mod(this.key.tonic + iv - 4, 12)).find((n) => n <= 35) ?? 33;
     this.chords = this.voicedChords();
+  }
+
+  /**
+   * The peak of a part: its final turn, from its second time round (or, for a part that comes only once, its
+   * second 8 bars). Where a returning part is at its biggest.
+   */
+  get peak(): boolean {
+    return this.finalTurn && (this.turn >= 1 || this.inRun >= 1);
+  }
+
+  /** A part heard before: a later turn, or the second half of a long one. */
+  get returning(): boolean {
+    return this.turn > 0 || this.inRun > 0;
   }
 
   /** Progress 0..1 through the whole run of this role, at progress `x` through this section. */

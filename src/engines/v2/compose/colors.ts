@@ -5,7 +5,7 @@
 import type { StyleId } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { choir, play } from './helpers.ts';
-import { makeMotif, phrase } from './melody.ts';
+import { makeMotif, phrase, TEXTURE } from './melody.ts';
 import {
   acidLine,
   acidPattern,
@@ -65,7 +65,7 @@ const COLORS: Record<ColorId, Color> = {
           })
         );
       }),
-    suits: { drift: 3, garden: 1, haze: 2, nocturne: 1, pulse: 1 },
+    suits: { drift: 3, garden: 1, haze: 2, pulse: 1 },
   },
   marimba: {
     write: (ctx, v) =>
@@ -91,7 +91,7 @@ const COLORS: Record<ColorId, Color> = {
   },
   guitar: {
     write: (ctx, v) => bars(ctx, (b) => pick(ctx, b, 'guitar', [0, 3, 2, 4, 1, 3, 2, 5], 2, v)),
-    suits: { haze: 2, drift: 2, nocturne: 2, pulse: 1, ember: 1 },
+    suits: { haze: 2, drift: 2, pulse: 1, ember: 1 },
   },
   strum: {
     write: (ctx, v) =>
@@ -128,11 +128,11 @@ const COLORS: Record<ColorId, Color> = {
   },
   strings: {
     write: (ctx, v) => padChords(ctx, 'strings', { cut: () => [2400, 3400], g: 0.7 * v, transpose: 12 }),
-    suits: { haze: 1, garden: 2, pulse: 1, rise: 1, ember: 1, drift: 1 },
+    suits: { haze: 1, garden: 2, pulse: 1, rise: 1, ember: 1, drift: 1, nocturne: 2 },
   },
   organ: {
     write: (ctx, v) => organChords(ctx, 0.8 * v),
-    suits: { ember: 2, nocturne: 1, drift: 1, haze: 1, pulse: 1 },
+    suits: { ember: 2, drift: 1, haze: 1, pulse: 1 },
   },
   congas: {
     write: (ctx, v) => bars(ctx, (b) => percBar(ctx, b, { conga: 'x..o..x.x..o....', congaHi: '......x.......x.' }, v)),
@@ -147,11 +147,11 @@ const COLORS: Record<ColorId, Color> = {
   },
   glock: {
     write: (ctx, v) => {
-      const m = makeMotif(ctx.mrng.fork('glock'), 0.3);
+      const m = makeMotif(ctx.mrng.fork('glock'), TEXTURE);
       play(
         ctx,
         'bell',
-        phrase(ctx, ctx.mrng.fork('glock-phrase', ctx.role), m, 0, ctx.bars, { center: 7, lo: 3, hi: 13, stretch: 2 }),
+        phrase(ctx, m, 0, ctx.bars, { center: 7, lo: 3, hi: 13, stretch: 2 }),
         v * 0.9,
         false,
       );
@@ -160,15 +160,15 @@ const COLORS: Record<ColorId, Color> = {
   },
   pluck: {
     write: (ctx, v) => bars(ctx, (b) => arp(ctx, b, 'broken', { v: v * 0.8, cut: () => 1800, rate: 2, dec: 0.6 })),
-    suits: { nocturne: 1, garden: 1, haze: 1, cathedral: 1, ember: 1, acid: 1 },
+    suits: { garden: 1, haze: 1, cathedral: 1, ember: 1, acid: 1 },
   },
   hum: {
     write: (ctx, v) => {
-      const m = makeMotif(ctx.mrng.fork('hum-line'), 0.25);
+      const m = makeMotif(ctx.mrng.fork('hum-line'), TEXTURE);
       play(
         ctx,
         'wind:hum',
-        phrase(ctx, ctx.mrng.fork('hum-phrase', ctx.role), m, 0, ctx.bars, { center: -1, lo: -5, hi: 5, stretch: 2 }),
+        phrase(ctx, m, 0, ctx.bars, { center: -1, lo: -5, hi: 5, stretch: 2 }),
         v,
         false,
       );
@@ -182,30 +182,29 @@ const IDS = Object.keys(COLORS) as ColorId[];
 /** The movement's colour, the same for all its sections. */
 function signature(ctx: Ctx): ColorId {
   const rng = ctx.mrng.fork('colours');
+  // now and then a less usual choice, but never one foreign to the style (a guitar in a piano nocturne)
   const wild = rng.chance(0.2);
-  const weighted = IDS.map((id) => [id, wild ? 1 : COLORS[id].suits[ctx.mv.style] ?? 0] as const).filter(([, w]) =>
-    w > 0
-  );
+  const weighted = IDS.map((id) =>
+    [id, (COLORS[id].suits[ctx.mv.style] ?? 0) && (wild ? 1 : COLORS[id].suits[ctx.mv.style]!)] as const
+  ).filter(([, w]) => w > 0);
   return rng.weighted(weighted);
 }
 
-/** How loud the colour plays in a section, or 0: absent at first, then part of the band. */
+/**
+ * How loud the colour plays in a section, or 0. It's something the piece grows into, not wallpaper: it comes in
+ * when a verse or a chorus returns, and has its moment in the bridge or the break.
+ */
 function level(ctx: Ctx): number {
   switch (ctx.sec.role) {
-    case 'intro':
-      return ctx.mrng.fork('colour-intro').chance(0.5) ? 0.35 : 0;
     case 'verse':
-      return ctx.occ ? 0.45 : 0;
-    case 'prechorus':
+      return ctx.returning ? 0.45 : 0;
     case 'chorus':
-      return 0.4;
+      return ctx.returning ? 0.4 : 0;
     case 'drop':
-      return 0.35;
+      return ctx.returning ? 0.35 : 0;
     case 'bridge':
     case 'break':
       return 0.45;
-    case 'outro':
-      return ctx.runStartBar === 0 ? 0.35 : 0;
     default:
       return 0;
   }

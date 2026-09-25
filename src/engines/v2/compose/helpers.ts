@@ -1,10 +1,18 @@
 // Helpers the v2 styles share: playing a melody on any instrument, choirs, solos, and the silences and
 // ringing endings that give a movement room to breathe.
 
-import type { Rng } from '../rng.ts';
 import type { LeadKind, MalletKind, Note, StringKind, Vowel, WindKind } from '../types.ts';
 import type { Ctx } from './context.ts';
-import { makeMotif, type Motif, phrase, PHRASE_FORMS, type PhraseForm, type RealizeOpts } from './melody.ts';
+import {
+  embellish,
+  makeMotif,
+  type Motif,
+  phrase,
+  PHRASE_FORMS,
+  type PhraseForm,
+  PROFILES,
+  type RealizeOpts,
+} from './melody.ts';
 
 /** Anything that can carry a melody. */
 export type Voice =
@@ -15,11 +23,41 @@ export type Voice =
   | `mallet:${MalletKind}`
   | `string:${StringKind}`;
 
-const WIND_TOP: Record<WindKind, number> = { hum: 79, sax: 80, flute: 96 };
+/** Where each voice sounds like itself, in MIDI notes: a line is moved there by octaves, never note by note. */
+const RANGE: Record<Voice, readonly [lo: number, hi: number]> = {
+  'string:guitar': [52, 86],
+  'string:electric': [52, 88],
+  'string:overdrive': [52, 88],
+  'string:harp': [48, 96],
+  'mallet:vibes': [53, 89],
+  'mallet:kalimba': [60, 88],
+  'mallet:marimba': [48, 88],
+  'wind:sax': [49, 80],
+  'wind:hum': [45, 79],
+  'wind:flute': [60, 96],
+  brass: [48, 82],
+  piano: [55, 91],
+  hook: [57, 88],
+  hook2: [57, 88],
+  saw: [57, 88],
+  flute: [60, 96],
+  bell: [60, 96],
+};
+
+function inRange(voice: Voice, ns: readonly Note[]): readonly Note[] {
+  const [lo, hi] = RANGE[voice];
+  const top = Math.max(...ns.map((n) => n.n));
+  const bottom = Math.min(...ns.map((n) => n.n));
+  let shift = 0;
+  while (top + shift > hi && bottom + shift - 12 >= lo - 5) shift -= 12;
+  while (bottom + shift < lo && top + shift + 12 <= hi + 5) shift += 12;
+  return shift ? ns.map((n) => ({ ...n, n: n.n + shift })) : ns;
+}
 
 /** Plays a line on a voice; `lead` false for a counter-line or an accent that shouldn't ride on top. */
-export function play(ctx: Ctx, voice: Voice, ns: readonly Note[], gain = 1, lead = true): void {
-  if (!ns.length) return;
+export function play(ctx: Ctx, voice: Voice, line: readonly Note[], gain = 1, lead = true): void {
+  if (!line.length) return;
+  const ns = inRange(voice, line);
   const [kind, sub] = voice.split(':') as [string, string | undefined];
   switch (kind) {
     case 'bell':
@@ -28,20 +66,9 @@ export function play(ctx: Ctx, voice: Voice, ns: readonly Note[], gain = 1, lead
     case 'piano':
       for (const n of ns) ctx.push({ i: 'piano', t: n.t, d: n.d, n: [n.n], v: 0.8 * gain * n.v, lead });
       break;
-    case 'wind': {
-      // a hummed or saxophone line stays where it can be played: the whole phrase moves down if it's high
-      const top = Math.max(...ns.map((n) => n.n));
-      let down = 0;
-      while (top - down > WIND_TOP[sub as WindKind]) down += 12;
-      ctx.push({
-        i: 'wind',
-        t: ns[0].t,
-        k: sub as WindKind,
-        ns: ns.map((n) => ({ ...n, n: n.n - down, v: n.v * gain })),
-        lead,
-      });
+    case 'wind':
+      ctx.push({ i: 'wind', t: ns[0].t, k: sub as WindKind, ns: ns.map((n) => ({ ...n, v: n.v * gain })), lead });
       break;
-    }
     case 'mallet':
       for (const n of ns) {
         ctx.push({ i: 'mallet', t: n.t, n: n.n, v: 0.9 * gain * n.v, k: sub as MalletKind, lead });
@@ -57,14 +84,12 @@ export function play(ctx: Ctx, voice: Voice, ns: readonly Note[], gain = 1, lead
   }
 }
 
-/** The movement's two motifs: A, the hook, and B, its contrast (used by bridges). */
-export function motifs(ctx: Ctx, density: number): { a: Motif; b: Motif } {
+/** The movement's two motifs in its style's idiom: A, the hook, and B, its falling contrast (bridges). */
+export function motifs(ctx: Ctx): { a: Motif; b: Motif } {
+  const p = PROFILES[ctx.mv.style];
   return {
-    a: makeMotif(ctx.mrng.fork('hook'), density),
-    b: makeMotif(
-      ctx.mrng.fork('hook-b'),
-      Math.max(0.1, Math.min(0.95, density + ctx.mrng.fork('b-density').range(-0.3, 0.2))),
-    ),
+    a: makeMotif(ctx.mrng.fork('hook'), p),
+    b: makeMotif(ctx.mrng.fork('hook-b'), { ...p, shapes: [['fall', 2], ['arch', 1]] }, 'short', 1),
   };
 }
 
@@ -88,32 +113,31 @@ export function sing(
   const role = opts.label ?? (ctx.role === 'drop' ? 'chorus' : ctx.role);
   // octaves up are decided for the whole phrase (it moves up only if all of it fits); folding single notes
   // back down would tear the melody's shape apart
+  // the final chorus or drop climbs an octave (when the piece has had one before)
   const lift = Math.max(0, o.transpose ?? 0) +
-    (ctx.occ >= 2 && (ctx.role === 'chorus' || ctx.role === 'drop') ? 12 : 0);
+    (ctx.finalTurn && ctx.turn >= 1 && (ctx.role === 'chorus' || ctx.role === 'drop') ? 12 : 0);
   const base = phrase(
     ctx,
-    ctx.mrng.fork('phrase', role),
     m,
     from,
     bars,
     { ...o, transpose: Math.min(0, o.transpose ?? 0) },
     opts.form ?? formFor(ctx, role),
     opts.b,
+    // the first half of a long part ends open, the second half closes it: one phrase, not the same one twice
+    ctx.runEnd ? undefined : 'open',
   );
   const top = base.reduce((x, n) => Math.max(x, n.n), 0);
   let up = 0;
-  while (up + 12 <= lift && top + up + 12 <= 93) up += 12;
+  while (up + 12 <= lift && top + up + 12 <= RANGE[voice][1]) up += 12;
   const ns = up ? base.map((n) => ({ ...n, n: n.n + up })) : base;
   play(ctx, voice, ns, opts.gain);
   return ns;
 }
 
-/** An improvised-sounding solo: a busy new motif from this section's own stream, spun out as a sentence. */
-export function solo(ctx: Ctx, voice: Voice, o: Omit<RealizeOpts, 'step'>, density = 0.85): void {
-  const rng: Rng = ctx.rng.fork('solo');
-  const m = makeMotif(rng, density);
-  const ns = phrase(ctx, rng, m, 0, ctx.bars, o, rng.pick(['sentence', 'sequence'] as const));
-  play(ctx, voice, ns);
+/** A solo: the hook paraphrased (ornamented, a little higher, spun out as a sentence), not a new tune. */
+export function solo(ctx: Ctx, voice: Voice, hook: Motif, o: Omit<RealizeOpts, 'step'>): void {
+  play(ctx, voice, phrase(ctx, embellish(hook, 2), 0, ctx.bars, { ...o, center: o.center + 2 }, 'sentence'));
 }
 
 /** A choir (or a hum) on each chord of the section. */
@@ -200,12 +224,36 @@ export function voiceFrom(ctx: Ctx, pool: readonly Voice[], not?: Voice): Voice 
 
 /**
  * The chorus: the movement's hook on its lead, the same notes every time it returns (repetition is what makes
- * a hook a hook). At the climax of the movement's arc the second voice doubles it an octave away, for size.
+ * a hook a hook). Each return grows by one thing: a middle return has the second voice answering the hook in
+ * its rests, the peak has it doubling the hook an octave away.
  */
 export function chorusMelody(ctx: Ctx, lead: Voice, second: Voice, m: Motif, o: Omit<RealizeOpts, 'step'>): void {
   const ns = sing(ctx, lead, m, o);
-  if (ctx.sec.energy < 0.9 || second === lead) return;
-  // an octave above if the whole line fits there, otherwise an octave below
-  const shift = ns.reduce((x, n) => Math.max(x, n.n), 0) + 12 <= 93 ? 12 : -12;
-  play(ctx, second, ns.map((n) => ({ ...n, n: n.n + shift })), 0.5);
+  if (second === lead) return;
+  if (ctx.peak) {
+    // an octave above if the whole line fits there, otherwise an octave below
+    const shift = ns.reduce((x, n) => Math.max(x, n.n), 0) + 12 <= RANGE[second][1] ? 12 : -12;
+    play(ctx, second, ns.map((n) => ({ ...n, n: n.n + shift })), 0.5);
+  } else if (ctx.returning) answer(ctx, second, ns);
+}
+
+/**
+ * A counter-line that answers the lead: in each of its rests of two beats or more, the top voice of the
+ * voice-led chord enters half a beat after the lead stops and holds until it returns. The pads' top voice moves
+ * by step, so the answers join into a line, and nothing in it is new to the harmony. Part of the bed, not the
+ * melody.
+ */
+export function answer(ctx: Ctx, voice: Voice, lead: readonly Note[], gain = 0.45): void {
+  const ns: Note[] = [];
+  let free = 0;
+  for (const [on, off] of [...lead.map((n) => [n.t, n.t + n.d]), [ctx.duration, ctx.duration]]) {
+    if (on - free >= 2 * ctx.beat) {
+      const step = Math.ceil((free + ctx.beat / 2) / ctx.s16);
+      const t = ctx.at(step);
+      const slot = ctx.chordAtStep(step);
+      ns.push({ t, d: Math.max(ctx.s16, on - t - ctx.s16), n: slot.voicing[slot.voicing.length - 1], v: 0.8 });
+    }
+    free = Math.max(free, off);
+  }
+  if (ns.length) play(ctx, voice, ns, gain, false);
 }

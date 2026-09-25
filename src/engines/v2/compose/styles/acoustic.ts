@@ -2,6 +2,7 @@
 
 import type { BassKind } from '../../types.ts';
 import type { Ctx } from '../context.ts';
+import { GARDEN, grooveFor, HAZE, playGroove } from '../grooves.ts';
 import {
   breath,
   choir,
@@ -21,7 +22,6 @@ import { invert } from '../melody.ts';
 import {
   arpNotes,
   bassFigure,
-  type BassHit,
   comp,
   drums,
   guitarVoicing,
@@ -36,8 +36,6 @@ import {
 
 // ------------------------------------------------------------------ haze: lo-fi hip hop
 
-const HAZE_KICKS = ['x......x..x.....', 'x.........x.....', 'x..x......x..x..', 'x......x.x......', 'x.....x...x.....'];
-const HAZE_HATS = ['x.o.x.o.x.o.x.o.', 'x-o-x-o-x-o-x-o-', 'x.o.x.oox.o.x.o-'];
 const COMPS: readonly (readonly (readonly [number, number])[])[] = [
   [[0, 16]],
   [[0, 6], [6, 2], [10, 6]],
@@ -46,27 +44,13 @@ const COMPS: readonly (readonly (readonly [number, number])[])[] = [
   [[0, 10], [14, 2]],
 ];
 
-/** The bass locks to the kick: a note on every kick, held to the next, plus a walk into the next chord. */
-function bassFromKick(kick: string): BassHit[] {
-  const on = [...kick].flatMap((c, s) => (c === 'x' || c === 'o' ? [s] : []));
-  const hits: BassHit[] = on.map((s, k) => {
-    const next = on[k + 1] ?? 16;
-    return [s, Math.min(next, 14) - s, k === 0 ? 0 : k % 2 ? 7 : 12, k === 0 ? 1 : 0.8];
-  });
-  if (!on.includes(14)) hits.push([14, 2, 'A', 0.75]);
-  return hits.filter(([, len]) => len > 0);
-}
-
 export function haze(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx, 0.45);
-  const kick = mrng.fork('kick').pick(HAZE_KICKS);
-  const hat = mrng.fork('hat').pick(HAZE_HATS);
+  const { a: hook, b: hookB } = motifs(ctx);
   const verseComp = mrng.fork('comp').pick(COMPS.slice(1));
   const chorusComp = mrng.fork('comp2').pick(COMPS.slice(1));
   const bassKind = mrng.fork('bass-kind').pick<BassKind>(['round', 'round', '808']);
-  const bass = bassFromKick(kick);
   const piano = mrng.fork('piano').chance(0.35);
   const leads: Voice[] = [
     'flute',
@@ -81,10 +65,10 @@ export function haze(ctx: Ctx): void {
   const lead = voiceFrom(ctx, leads);
   const second = voiceFrom(ctx, ['wind:sax', 'mallet:vibes', 'string:electric', 'piano', 'string:guitar'], lead);
   const guitar = mrng.fork('guitar').chance(0.45);
-  const snap = mrng.fork('snap').chance(0.4);
   const kit = { kick: 'dusty', snare: 'dusty', hat: 'dusty', sc: 0.15 } as const;
-  const snare = mrng.fork('snare').chance(0.5) ? '....x.......x..-' : '....x.......x...';
-  const fill = mrng.fork('fill').pick(['....x.......x-o-', '....x.....-.x.-o', '....x...-...x-x-']);
+  const g = grooveFor(ctx, HAZE);
+  const band = { kit, bass: bassKind, bassGain: 0.9, perc: 0.5 } as const;
+  const hat = g.light.hat ?? 'x.o.x.o.x.o.x.o.';
   const keys = (b: number, hits: readonly (readonly [number, number])[], v: number) => {
     if (!piano) return comp(ctx, b, hits, v);
     for (const [s, len] of hits) {
@@ -98,10 +82,6 @@ export function haze(ctx: Ctx): void {
       });
     }
   };
-  const beat = (b: number, extra = {}) => {
-    drums(ctx, b, { kick, snare: b === ctx.bars - 1 ? fill : snare, hat, ...extra }, kit);
-    if (snap) percBar(ctx, b, { snap: '....x.......x...' }, 0.5);
-  };
 
   if (ctx.mv.tone.crackle > 0 && ctx.role !== 'rest') ctx.push({ i: 'vinyl', t: 0, d: ctx.duration });
 
@@ -112,18 +92,20 @@ export function haze(ctx: Ctx): void {
       break;
     case 'verse':
       for (let b = 0; b < bars; b++) {
-        beat(b);
-        bassFigure(ctx, b, bass, bassKind, 0.9);
+        playGroove(ctx, g, b, band);
         keys(b, verseComp, 0.7);
-        if (guitar && ctx.occ) pick(ctx, b, 'guitar', [0, 4, 3, 5, 4, 3], 2, 0.4);
+        if (guitar && ctx.returning) pick(ctx, b, 'guitar', [0, 4, 3, 5, 4, 3], 2, 0.4);
       }
       // stop-time: the band hits the downbeat together and leaves the rest of the bar empty
       if (bars >= 8 && mrng.fork('stop-time').chance(0.4)) stopTime(ctx, 7);
       break;
     case 'prechorus':
       for (let b = 0; b < bars; b++) {
-        drums(ctx, b, { hat, snare: b === last ? '....x...x.x.xxxx' : snare }, kit, 0.85);
-        bassFigure(ctx, b, bass, bassKind, 0.8);
+        if (b < last) playGroove(ctx, g, b, { ...band, gain: 0.85, bassGain: 0.8 });
+        else {
+          drums(ctx, b, { hat, snare: '....x...x.x.xxxx' }, { ...kit, lag: g.lag }, 0.85);
+          bassFigure(ctx, b, g.bassFull, bassKind, 0.8);
+        }
         keys(b, chorusComp, 0.65);
       }
       stopBefore(ctx, 1);
@@ -131,8 +113,7 @@ export function haze(ctx: Ctx): void {
     case 'chorus':
       padChords(ctx, 'warm', { cut: () => [900, 1100], g: 0.3 });
       for (let b = 0; b < bars; b++) {
-        beat(b, { shaker: '..-...-...-...-.' });
-        bassFigure(ctx, b, bass, bassKind, 0.9);
+        playGroove(ctx, g, b, band);
         keys(b, chorusComp, 0.62);
         if (guitar) pick(ctx, b, 'guitar', [3, 4, 5, 4], 2, 0.35);
       }
@@ -140,11 +121,10 @@ export function haze(ctx: Ctx): void {
       break;
     case 'solo':
       for (let b = 0; b < bars; b++) {
-        beat(b);
-        bassFigure(ctx, b, bass, bassKind, 0.85);
+        playGroove(ctx, g, b, { ...band, bassGain: 0.85 });
         keys(b, verseComp, 0.55);
       }
-      solo(ctx, second, { center: second === 'string:electric' ? 0 : 2, lo: -3, hi: 9 }, 0.7);
+      solo(ctx, second, hook, { center: second === 'string:electric' ? 0 : 2, lo: -3, hi: 9 });
       break;
     case 'bridge':
       for (let b = 0; b < bars; b++) {
@@ -167,8 +147,7 @@ export function haze(ctx: Ctx): void {
     default:
       for (let b = 0; b < bars; b++) keys(b, b < half ? verseComp : COMPS[0], 0.6);
       for (let b = 0; b < half; b++) {
-        drums(ctx, b, { kick, snare }, kit, 0.85);
-        bassFigure(ctx, b, bass, bassKind, 0.8);
+        playGroove(ctx, g, b, { ...band, gain: 0.85, bassGain: 0.8 });
       }
   }
   ringOut(ctx);
@@ -182,7 +161,7 @@ const OSTINATOS: readonly (readonly number[])[] = [[0, 2, 1], [0, 1, 2, 3], [0, 
 export function garden(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx, 0.5);
+  const { a: hook, b: hookB } = motifs(ctx);
   const leads: Voice[] = ['mallet:kalimba', 'wind:flute', 'wind:hum', 'mallet:vibes', 'string:guitar', 'wind:sax'];
   const lead = voiceFrom(ctx, leads);
   const second = voiceFrom(ctx, ['mallet:kalimba', 'wind:flute', 'string:guitar', 'mallet:vibes'], lead);
@@ -190,8 +169,8 @@ export function garden(ctx: Ctx): void {
   const every = mrng.fork('ost-rate').pick([1, 2] as const);
   const strumming = mrng.fork('guitar').chance(0.5);
   const bassKind = mrng.fork('bass').pick<BassKind>(['round', '808', 'round']);
-  const conga = mrng.fork('conga').pick(['x..o..x.x..o....', 'x.o...o.x.o...o.', 'o..x..o.o..x..x.']);
-  const bongo = mrng.fork('bongo').pick(['..x-..x-..x-..x-', '.x...x.x.x...x..']);
+  const g = grooveFor(ctx, GARDEN);
+  const band = { kit: { kick: 'soft', snare: 'rim', sc: 0.15 }, bass: bassKind, bassGain: 0.7, perc: 0.8 } as const;
 
   const marimba = (b: number, v: number) => {
     const ns = arpNotes(ctx.chordAt(b), 60);
@@ -213,8 +192,6 @@ export function garden(ctx: Ctx): void {
       strum(ctx, ctx.barAt(b, 10), ns, 'guitar', v * 0.85);
     } else pick(ctx, b, 'guitar', [0, 3, 2, 4, 1, 3, 2, 5], 2, v);
   };
-  const hands = (b: number, full: boolean) =>
-    percBar(ctx, b, { conga, congaHi: full ? '......x.......x.' : undefined, bongo: full ? bongo : undefined }, 0.8);
 
   if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'ping', a: 0.5 });
 
@@ -228,46 +205,36 @@ export function garden(ctx: Ctx): void {
       break;
     case 'verse':
       padChords(ctx, 'warm', { cut: () => [1200, 1600], g: 0.45 });
-      sustainedBass(ctx, bassKind, 0.7);
       for (let b = 0; b < bars; b++) {
         marimba(b, 0.65);
         guitar(b, 0.55);
-        hands(b, ctx.occ > 0);
-        drums(ctx, b, { shaker: '-o-o-o-o-o-o-o-o' }, {}, 0.6);
+        playGroove(ctx, g, b, band);
       }
       break;
     case 'prechorus':
       padChords(ctx, 'warm', { cut: (_, i) => [1200 + 500 * i, 1800 + 600 * i], g: 0.5 });
-      sustainedBass(ctx, bassKind, 0.7);
       for (let b = 0; b < bars; b++) {
         guitar(b, 0.6);
-        hands(b, true);
+        playGroove(ctx, g, b, band);
       }
       stopBefore(ctx, 1);
       break;
     case 'chorus':
       padChords(ctx, 'warm', { cut: () => [1600, 2200], g: 0.5 });
-      sustainedBass(ctx, bassKind, 0.8);
       for (let b = 0; b < bars; b++) {
         marimba(b, 0.55);
         guitar(b, 0.6);
-        hands(b, true);
-        drums(ctx, b, { kick: 'x.........x.....', snare: '........x.......', shaker: '-o-o-o-o-o-o-o-o' }, {
-          kick: 'soft',
-          snare: 'rim',
-          sc: 0.15,
-        }, 0.8);
+        playGroove(ctx, g, b, { ...band, bassGain: 0.8 });
       }
       chorusMelody(ctx, lead, second, hook, { center: 2, lo: -2, hi: 9 });
       break;
     case 'solo':
       padChords(ctx, 'warm', { cut: () => [1400, 1800], g: 0.45 });
-      sustainedBass(ctx, bassKind, 0.75);
       for (let b = 0; b < bars; b++) {
         guitar(b, 0.5);
-        hands(b, true);
+        playGroove(ctx, g, b, { ...band, bassGain: 0.75 });
       }
-      solo(ctx, second, { center: 2, lo: -2, hi: 10 }, 0.75);
+      solo(ctx, second, hook, { center: 2, lo: -2, hi: 10 });
       break;
     case 'bridge':
       padChords(ctx, 'strings', { cut: () => [2000, 2800], g: 0.45 });
@@ -293,7 +260,7 @@ export function garden(ctx: Ctx): void {
       sustainedBass(ctx, bassKind, 0.6, 0, bars, 2);
       for (let b = 0; b < bars; b++) {
         marimba(b, 0.6 * (1 - b / bars));
-        if (b < half) hands(b, false);
+        if (b < half) playGroove(ctx, g, b, { ...band, withBass: false, gain: 0.8 });
         if (b < last) guitar(b, 0.45);
       }
   }
@@ -305,11 +272,11 @@ export function garden(ctx: Ctx): void {
 export function nocturne(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx, 0.4);
+  const { a: hook, b: hookB } = motifs(ctx);
   const figure = mrng.fork('figure').pick<PianoFigure>(['broken', 'alberti', 'rolling', 'broken', 'block']);
   const chorusFigure: PianoFigure = figure === 'block' ? 'broken' : 'rolling';
   const hum = mrng.fork('hum').chance(0.5);
-  const second = voiceFrom(ctx, ['wind:hum', 'wind:flute', 'string:harp', 'mallet:vibes', 'wind:sax', 'string:guitar']);
+  const second = voiceFrom(ctx, ['wind:hum', 'wind:flute', 'string:harp', 'mallet:vibes']);
   const lh = (from: number, to: number, fig: PianoFigure, v: number) => {
     for (let b = from; b < to; b++) pianoBar(ctx, b, fig, v);
   };
@@ -328,7 +295,7 @@ export function nocturne(ctx: Ctx): void {
     case 'verse':
       lh(0, bars, figure, 0.55);
       sing(ctx, 'piano', hook, { center: 4, lo: 0, hi: 11, velocity: 0.8 });
-      if (ctx.occ) padChords(ctx, 'strings', { cut: () => [1800, 2400], g: 0.35 });
+      if (ctx.returning) padChords(ctx, 'strings', { cut: () => [1800, 2400], g: 0.35 });
       breathe();
       break;
     case 'chorus':
@@ -341,7 +308,7 @@ export function nocturne(ctx: Ctx): void {
     case 'solo':
       lh(0, bars, figure, 0.5);
       padChords(ctx, 'strings', { cut: () => [1800, 2400], g: 0.3 });
-      solo(ctx, 'piano', { center: 5, lo: 1, hi: 13 }, 0.65);
+      solo(ctx, 'piano', hook, { center: 5, lo: 1, hi: 13 });
       break;
     case 'bridge':
       lh(0, bars, 'block', 0.5);
