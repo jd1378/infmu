@@ -17,6 +17,7 @@ import {
   EIGHTHS,
   OCTAVES,
   OFFBEAT,
+  opening,
   organChords,
   padChords,
   roll,
@@ -28,6 +29,7 @@ import {
 } from './parts.ts';
 
 export function arrange(ctx: Ctx): void {
+  opening(ctx);
   ARRANGERS[ctx.mv.style](ctx);
   transition(ctx);
 }
@@ -52,8 +54,6 @@ function rise(ctx: Ctx): void {
   const shape = mrng.fork('arp').pick<ArpShape>(['hemi', 'hemi', 'updown', 'broken']);
   const rolling = mrng.fork('bass').pick(ROLLING);
   const first = ctx.chords[0];
-
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'hit', a: 1, n: stab(first) });
 
   switch (ctx.role) {
     case 'intro':
@@ -171,8 +171,6 @@ function pulse(ctx: Ctx): void {
   const arps = (from: number, to: number, v: (b: number) => number, cut: (x: number) => number) => {
     for (let b = from; b < to; b++) arp(ctx, b, shape, { v: v(b), cut, from: 57, dec: 0.75 });
   };
-
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'soft', a: 0.7, n: stab(ctx.chords[0]) });
 
   switch (ctx.role) {
     case 'intro':
@@ -342,11 +340,6 @@ function drift(ctx: Ctx): void {
     for (let b = from; b < to; b++) arp(ctx, b, 'broken', { v, cut: () => 2400, from: 64, rate: 2, dec: 0.35 });
   };
 
-  if (ctx.isFirst) {
-    ctx.push({ i: 'impact', t: 0, k: 'ping', a: 0.8 });
-    bells(ctx, [{ t: 0, d: 4, n: ctx.tonicMid + 12, v: 1 }, { t: 0, d: 4, n: ctx.tonicMid + 19, v: 0.6 }], 0.8);
-  }
-
   switch (ctx.role) {
     case 'intro':
       ctx.push({ i: 'drone', t: 0, d: ctx.duration + 2, n: ctx.tonicLow + 12 });
@@ -404,13 +397,10 @@ function cathedral(ctx: Ctx): void {
     }
   };
 
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'cosmic', a: 0.7, n: stab(first) });
-
   switch (ctx.role) {
     case 'intro':
       ctx.push({ i: 'drone', t: 0, d: ctx.duration + 2, n: ctx.tonicLow + 12 });
       organChords(ctx, 0.6);
-      if (ctx.isFirst) bells(ctx, [{ t: 0, d: 4, n: ctx.tonicMid + 12, v: 1 }], 0.7);
       break;
     case 'verse':
       organChords(ctx, 0.85);

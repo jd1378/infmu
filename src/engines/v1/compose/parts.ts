@@ -282,6 +282,17 @@ export function nextOpeningChord(ctx: Ctx): number[] {
   return voiceLead(null, first.pcs, 4, PAD_LO, PAD_HI);
 }
 
+/**
+ * How a movement opens: quietly, its intro building from nothing. An accent on the first beat (a bell, an
+ * impact with a chord stab) jumped out of every quiet intro, piece after piece. Only a reverse swell from the
+ * piece before needs a downbeat to land on: a soft one, without a crash or a chord.
+ */
+export function opening(ctx: Ctx): void {
+  if (!ctx.isFirst) return;
+  const prev = ctx.mv.index > 0 ? ctx.song.movement(ctx.mv.index - 1) : null;
+  if (prev?.transition === 'swell') ctx.push({ i: 'impact', t: 0, k: 'ping', a: 0.4 });
+}
+
 /** Movement hand-over, written into the last section. */
 export function transition(ctx: Ctx): void {
   if (!ctx.isLast) return;

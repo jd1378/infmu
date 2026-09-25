@@ -63,22 +63,11 @@ export function drift(ctx: Ctx): void {
     }
   };
 
-  if (ctx.isFirst) {
-    ctx.push({ i: 'impact', t: 0, k: 'ping', a: 0.8 });
-    play(
-      ctx,
-      'bell',
-      [{ t: 0, d: 4, n: ctx.tonicMid + 12, v: 1 }, { t: 0, d: 4, n: ctx.tonicMid + 19, v: 0.6 }],
-      1.1,
-      false,
-    );
-  }
-
   switch (ctx.role) {
     case 'intro':
       ctx.push({ i: 'drone', t: 0, d: ctx.duration + 2, n: ctx.tonicLow + 12 });
       padChords(ctx, 'warm', { cut: (_, i) => [1100 + 400 * i, 1600 + 400 * i], g: 0.75 });
-      if (!ctx.isFirst) shimmer(half, bars, 0.3);
+      shimmer(half, bars, 0.3);
       break;
     case 'verse':
       padChords(ctx, 'warm', { cut: () => [1600, 2800], g: 0.8 });
@@ -162,13 +151,10 @@ export function cathedral(ctx: Ctx): void {
     }
   };
 
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'cosmic', a: 0.7, n: stab(first) });
-
   switch (ctx.role) {
     case 'intro':
       ctx.push({ i: 'drone', t: 0, d: ctx.duration + 2, n: ctx.tonicLow + 12 });
       organChords(ctx, 0.6);
-      if (ctx.isFirst) play(ctx, 'bell', [{ t: 0, d: 4, n: ctx.tonicMid + 12, v: 1 }], 1, false);
       break;
     case 'verse':
       organChords(ctx, 0.85);

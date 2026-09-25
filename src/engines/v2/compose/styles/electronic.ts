@@ -54,8 +54,6 @@ export function rise(ctx: Ctx): void {
   // the drops belong to the supersaw hook; one soft voice sings the breakdowns and the bridge
   const second = voiceFrom(ctx, ['bell', 'mallet:vibes', 'piano', 'wind:hum', 'mallet:kalimba']);
 
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'hit', a: 1, n: stab(first) });
-
   switch (ctx.role) {
     case 'intro':
       // one arc across the whole run of intro sections: the filter keeps opening, parts keep arriving
@@ -199,8 +197,6 @@ export function pulse(ctx: Ctx): void {
     bassFigure(ctx, b, g.bassFull.filter(([s]) => s < 12), g.bassKind ?? 'pulse', bassGain);
   };
 
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'soft', a: 0.7, n: stab(ctx.chords[0]) });
-
   switch (ctx.role) {
     case 'intro':
       padChords(ctx, 'warm', { cut: (_, i) => [900 + 250 * i, 1200 + 300 * i], g: 0.8 });
@@ -303,8 +299,6 @@ export function acid(ctx: Ctx): void {
   const line = (from: number, n: number, c0: number, c1: number, res: number, env: number) =>
     acidLine(ctx, pattern, from, n, [c0 * (1 + open), c1 * (1 + 0.6 * open)], res, env, square);
   const band = { kit, bass: 'sub', bassGain: 0.5 } as const;
-
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'soft', a: 0.6 });
 
   switch (ctx.role) {
     case 'intro': {

@@ -5,7 +5,7 @@
 import type { StyleId } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { colours } from './colors.ts';
-import { transition } from './parts.ts';
+import { opening, transition } from './parts.ts';
 import { garden, haze, nocturne } from './styles/acoustic.ts';
 import { cathedral, drift, ember } from './styles/atmospheric.ts';
 import { acid, pulse, rise } from './styles/electronic.ts';
@@ -23,6 +23,7 @@ const ARRANGERS: Record<StyleId, (ctx: Ctx) => void> = {
 };
 
 export function arrange(ctx: Ctx): void {
+  opening(ctx);
   ARRANGERS[ctx.mv.style](ctx);
   colours(ctx);
   transition(ctx);

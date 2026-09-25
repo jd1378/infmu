@@ -299,3 +299,23 @@ Deno.test('a part counts its returns, not its sections', () => {
   }
   assert(runs > 5, `only ${runs} continued runs`);
 });
+
+Deno.test('a movement opens quietly: no hit or bell on its first beat', () => {
+  let landings = 0;
+  for (let seed = 0; seed < 12; seed++) {
+    const song = new Song(`opening-${seed}`);
+    for (let m = 0; m < 4; m++) {
+      const mv = song.movement(m);
+      const first = composeSection(song, mv.firstSection).events.filter((e) => e.t < 0.1);
+      const hits = first.filter((e) => e.i === 'impact' || e.i === 'bell');
+      // only a reverse swell from the piece before lands on a soft downbeat
+      const swell = m > 0 && song.movement(m - 1).transition === 'swell';
+      if (swell) landings++;
+      assert(
+        hits.every((e) => swell && e.i === 'impact' && e.k === 'ping' && e.a <= 0.4),
+        `${mv.style} opens with ${hits.map((e) => e.i).join(', ')}`,
+      );
+    }
+  }
+  assert(landings > 0, 'no swell hand-over found');
+});

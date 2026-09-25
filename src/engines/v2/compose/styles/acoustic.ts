@@ -193,8 +193,6 @@ export function garden(ctx: Ctx): void {
     } else pick(ctx, b, 'guitar', [0, 3, 2, 4, 1, 3, 2, 5], 2, v);
   };
 
-  if (ctx.isFirst) ctx.push({ i: 'impact', t: 0, k: 'ping', a: 0.5 });
-
   switch (ctx.role) {
     case 'intro':
       padChords(ctx, 'warm', { cut: (_, i) => [900 + 200 * i, 1300 + 200 * i], g: 0.6 });

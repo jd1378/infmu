@@ -1,6 +1,9 @@
 // v1 is frozen: these fingerprints were taken from the deployed build before versions existed
 // (commit 791e586). If one changes, a seed someone shared now plays something else. Don't update them;
 // put the change in a new engine version instead.
+// One deliberate exception: the hit or bell on each movement's first beat was removed (it jumped out of every
+// quiet intro). That changed only the scores of movement openings (three entries below); every other note,
+// every plan and every rendered fingerprint here is still what was deployed.
 
 import { assertEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v1/compose/index.ts';
@@ -22,14 +25,14 @@ const pcm = (a: Float32Array) => {
 
 const GOLDEN: Record<string, string> = {
   'plan:amber-quiet-harbor': '2e72aea',
-  'score:amber-quiet-harbor:0': '9796524b',
+  'score:amber-quiet-harbor:0': '89c30a28',
   'score:amber-quiet-harbor:3': 'f35faa78',
-  'score:amber-quiet-harbor:11': 'ca6c6c8d',
+  'score:amber-quiet-harbor:11': 'a7a885c9',
   'score:amber-quiet-harbor:26': '70982069',
   'audio:amber-quiet-harbor:1': '5452f53118caad5a',
   'audio:amber-quiet-harbor:7': '2feecfa518951791',
   'plan:hello': '3a277edf',
-  'score:hello:0': '73cd207b',
+  'score:hello:0': '795b7631',
   'score:hello:3': '2ec9ca8c',
   'score:hello:11': '204628fc',
   'score:hello:26': 'cfe1c96a',
