@@ -21,12 +21,15 @@ export class Bus {
   duck: Float32Array;
   readonly noise: Noise;
   readonly tone: Tone;
+  /** Concert pitch: the frequency of A4 every note is tuned from. */
+  readonly a4: number;
   private readonly wowCurve: Float32Array | null;
   /** Rendered drum hits by kind: a drum machine plays the same sample every time, and so can we. */
   private readonly protos = new Map<string, Float32Array>();
 
-  constructor(sr: number, seconds: number, noiseSeed: number, tone: Tone) {
+  constructor(sr: number, seconds: number, noiseSeed: number, tone: Tone, a4 = 440) {
     this.sr = sr;
+    this.a4 = a4;
     this.n = Math.round(seconds * sr);
     [this.L, this.R, this.ML, this.MR, this.REV, this.DLY, this.AMP] = [0, 0, 0, 0, 0, 0, 0].map(() =>
       new Float32Array(this.n)
@@ -41,6 +44,11 @@ export class Bus {
         return 1 + w * (0.0022 * Math.sin(TAU * 0.5 * t + 1.3) + 0.0007 * Math.sin(TAU * 3.1 * t));
       })
       : null;
+  }
+
+  /** Frequency of MIDI note `m` (fractional for glides and vibrato) at this bus's concert pitch. */
+  hz(m: number): number {
+    return this.a4 * 2 ** ((m - 69) / 12);
   }
 
   /** Tape wow: a slow pitch wander, as a frequency multiplier at time t. */

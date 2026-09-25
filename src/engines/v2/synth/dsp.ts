@@ -2,7 +2,6 @@
 // every piece of state lives in an object, so several sections can render side by side in workers.
 
 export const TAU = 2 * Math.PI;
-export const mtof = (m: number) => 440 * 2 ** ((m - 69) / 12);
 export const smooth = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 /** Equal-power pan, p in [-1, 1] -> [left, right] gains. */
 export const pan = (

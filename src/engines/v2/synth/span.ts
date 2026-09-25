@@ -20,6 +20,7 @@ export function renderSpan(
   count: number,
   sampleRate: number,
   onSection?: (s: SpanStats) => void,
+  a4 = 440,
 ): Rendered {
   const scores = [];
   for (let i = from; i < from + count; i++) scores.push(composeSection(song, i));
@@ -41,13 +42,13 @@ export function renderSpan(
   for (let j = from - 1; j >= 0 && gap < 10; j--) {
     const prev = composeSection(song, j);
     before += prev.duration;
-    if (gap < prev.tail) add(renderScore(prev, sampleRate), -before, Math.round(before * sampleRate));
+    if (gap < prev.tail) add(renderScore(prev, sampleRate, a4), -before, Math.round(before * sampleRate));
     gap += prev.duration;
   }
   let at = 0;
   for (const s of scores) {
     const t0 = performance.now();
-    const r = renderScore(s, sampleRate);
+    const r = renderScore(s, sampleRate, a4);
     onSection?.({ index: s.index, lufs: r.lufs, gain: r.gain, ms: performance.now() - t0 });
     add(r, at);
     at += s.duration;

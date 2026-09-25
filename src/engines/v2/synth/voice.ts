@@ -3,7 +3,7 @@
 
 import type { Ev, Vowel } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { mtof, pan, saw, smooth, SVF, TAU } from './dsp.ts';
+import { pan, saw, smooth, SVF, TAU } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 const { exp, sin, min, max, sqrt, round, tanh } = Math;
@@ -23,7 +23,7 @@ export function choir(b: Bus, e: E<'choir'>): void {
   e.n.forEach((m, k) => {
     for (const cents of [-7, 0, 7]) {
       const [l, r] = pan(((k % 2 ? 1 : -1) * 0.4 + cents / 20) * 0.9);
-      voices.push({ ph: b.noise.unit(), inc: (mtof(m) * 2 ** (cents / 1200)) / sr, l, r, lfo: TAU * b.noise.unit() });
+      voices.push({ ph: b.noise.unit(), inc: (b.hz(m) * 2 ** (cents / 1200)) / sr, l, r, lfo: TAU * b.noise.unit() });
     }
   });
   const bank = FORMANTS[e.vowel].map(([f, g, q]) => [new SVF(sr, f, q), new SVF(sr, f, q), g] as const);
@@ -107,7 +107,7 @@ export function acid(b: Bus, e: E<'acid'>): void {
       if (!tied) env = 1; // a slide doesn't re-strike the filter
     }
     pitch = tied ? pitch + (nt.n - pitch) * glide : nt.n;
-    const inc = mtof(pitch) / sr;
+    const inc = b.hz(pitch) / sr;
     ph += inc;
     if (ph >= 1) ph -= 1;
     const osc = e.square ? saw(ph, inc) - saw(ph >= 0.5 ? ph - 0.5 : ph + 0.5, inc) : saw(ph, inc);
@@ -188,7 +188,7 @@ export function wind(b: Bus, e: E<'wind'>): void {
     pitch += (nt.n - pitch) * glide;
     scoop *= 1 - 1 / (0.05 * sr);
     const vib = (sax ? 0.22 : hum ? 0.25 : 0.16) * smooth((u - 0.25) / 0.4) * sin(TAU * (sax ? 5.4 : 5.1) * t);
-    const f = mtof(pitch + vib + scoop);
+    const f = b.hz(pitch + vib + scoop);
     const inc = f / sr;
     ph += inc;
     if (ph >= 1) ph -= 1;

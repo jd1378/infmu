@@ -61,9 +61,10 @@ const FX: ReadonlySet<Ev['i']> = new Set(['impact', 'rise', 'drone', 'vinyl']);
 const stemOf = (e: Ev): Stem =>
   isMelody(e) ? 'melody' : DRUMS.has(e.i) ? 'drums' : e.i === 'bass' ? 'bass' : FX.has(e.i) ? 'fx' : 'bed';
 
-export function renderScore(score: Score, sampleRate: number): Rendered {
+/** Renders a section; `a4` is the concert pitch (Hz of the A above middle C). */
+export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendered {
   const seconds = score.duration + score.tail;
-  const b = new Bus(sampleRate, seconds, score.noiseSeed, score.movement.tone);
+  const b = new Bus(sampleRate, seconds, score.noiseSeed, score.movement.tone, a4);
   const kicks = score.events.filter((e): e is E<'kick'> => e.i === 'kick');
   b.duck = I.sidechain(b, kicks);
   const of = (s: Stem) => score.events.filter((e) => stemOf(e) === s);
@@ -148,7 +149,7 @@ function dryLufs(x: Bus): number {
 /** Renders a stem on buses of its own, then mixes it into `b` at the gain `level` gives for its loudness. */
 function stem(b: Bus, score: Score, events: readonly Ev[], salt: number, level: (own: number) => number): void {
   if (!events.length) return;
-  const s = new Bus(b.sr, score.duration + score.tail, (score.noiseSeed ^ salt) >>> 0, score.movement.tone);
+  const s = new Bus(b.sr, score.duration + score.tail, (score.noiseSeed ^ salt) >>> 0, score.movement.tone, b.a4);
   s.duck = b.duck;
   playAll(s, events);
   const g = level(dryLufs(s));

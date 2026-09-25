@@ -4,7 +4,7 @@
 
 import type { Ev, MalletKind } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { mtof, SVF, TAU } from './dsp.ts';
+import { SVF, TAU } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 const { exp, sin, cos, min, max, sqrt, pow } = Math;
@@ -79,7 +79,7 @@ const MALLET: Record<MalletKind, MalletModel> = {
 export function mallet(b: Bus, e: E<'mallet'>): void {
   const m = MALLET[e.k];
   const sr = b.sr;
-  const f = mtof(e.n);
+  const f = b.hz(e.n);
   const tau = min(4, max(0.12, m.decay * pow(262 / f, 0.5)));
   // each partial decays exponentially: a running gain times a per-sample factor, instead of exp() per sample
   const parts: { osc: Partial; env: number; fall: number }[] = [];
@@ -134,7 +134,7 @@ export function piano(b: Bus, e: E<'piano'>): void {
   const notes = e.n.slice().sort((x, y) => x - y);
   const strum = e.strum ?? 0.012;
   notes.forEach((m, idx) => {
-    const f = mtof(m);
+    const f = b.hz(m);
     const B = 0.00008 * pow(2, (m - 48) / 18);
     const tau0 = min(8, max(0.8, 3.8 * pow(262 / f, 0.6)));
     const dark = 0.38 - 0.22 * e.v; // a harder strike reaches further up the partials
@@ -198,7 +198,7 @@ export function perc(b: Bus, e: E<'perc'>): void {
     case 'congaHi':
     case 'bongo': {
       // a membrane: the pitch drops as the head settles, a slap of noise on top
-      const f0 = e.n !== undefined ? mtof(e.n) : { conga: 196, congaHi: 262, bongo: 392 }[e.k];
+      const f0 = e.n !== undefined ? b.hz(e.n) : { conga: 196, congaHi: 262, bongo: 392 }[e.k];
       const dec = { conga: 0.22, congaHi: 0.16, bongo: 0.1 }[e.k];
       b.hit(
         `perc:${e.k}:${f0.toFixed(1)}`,

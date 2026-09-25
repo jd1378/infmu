@@ -8,13 +8,13 @@
 
 import type { Ev } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { mtof, SVF } from './dsp.ts';
+import { SVF } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 
 export function string(b: Bus, e: E<'string'>): void {
   const sr = b.sr;
-  const f = mtof(e.n);
+  const f = b.hz(e.n);
   const harp = e.k === 'harp';
   const electric = e.k === 'electric' || e.k === 'overdrive';
   // loop filter y = (1 - s)·x + s·x[-1]: more s, darker and shorter; its delay is s samples

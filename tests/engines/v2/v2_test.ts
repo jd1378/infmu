@@ -225,3 +225,16 @@ Deno.test('every chorus of a movement restates the same hook on the same voice',
   }
   assert(checked >= 5, `only ${checked} returning choruses checked`);
 });
+
+Deno.test('the concert pitch retunes every note', () => {
+  const base = composeSection(new Song('tuning', ['drift']), 1);
+  const a3: Ev[] = [{ i: 'bass', t: 0, d: 2, n: 57, v: 0.8, k: 'sub' }];
+  for (const a4 of [440, 432]) {
+    const sr = 16000;
+    const r = renderScore({ ...base, events: a3, duration: 2.5, tail: 0.5 }, sr, a4);
+    // the fundamental from rising zero crossings over the sustained second
+    let crossings = 0;
+    for (let i = sr * 0.5 + 1; i < sr * 1.5; i++) if (r.left[i - 1] < 0 && r.left[i] >= 0) crossings++;
+    assert(Math.abs(crossings - a4 / 2) <= 2, `A3 at A4 = ${a4} Hz sounds at about ${crossings} Hz`);
+  }
+});

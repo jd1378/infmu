@@ -4,11 +4,10 @@
 
 import type { Ev, KickKind, LeadKind, PadKind, RiseKind } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { freeverb, mtof, pan, saw, smooth, SVF, TAU } from './dsp.ts';
+import { freeverb, pan, saw, smooth, SVF, TAU } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 const { exp, sin, tanh, min, max, sqrt, round, PI } = Math;
-const D1 = mtof(26);
 /** Release: -60 dB, r samples after note-off at sample `on`. */
 const fall = (j: number, on: number, r: number) => (j > on ? exp((-6.9 * (j - on)) / r) : 1);
 
@@ -31,7 +30,7 @@ const KICK: Record<KickKind, readonly number[]> = {
 export function kick(b: Bus, e: E<'kick'>): void {
   const [f0, tau, dec, drive, g0, ck, sw, kn, pu, lpf] = KICK[e.k];
   const sr = b.sr;
-  const f1 = mtof(e.n);
+  const f1 = b.hz(e.n);
   b.hit(
     `kick:${e.k}:${e.n}`,
     e.t,
@@ -156,7 +155,7 @@ export function snare(b: Bus, e: E<'snare'>): void {
 }
 
 export function tom(b: Bus, e: E<'tom'>): void {
-  const f = mtof(e.n);
+  const f = b.hz(e.n);
   b.hit(
     `tom:${e.n}`,
     e.t,
@@ -217,7 +216,7 @@ export function hat(b: Bus, e: E<'hat'>): void {
 // so the overtones above 500 Hz and a 900 Hz growl are boosted: the ear rebuilds the line.
 export function bass(b: Bus, e: E<'bass'>): void {
   const sr = b.sr;
-  const dt = mtof(e.n) / sr;
+  const dt = b.hz(e.n) / sr;
   let ps = 0;
   let pw = 0.5;
   if (e.k === 'heart') {
@@ -271,7 +270,7 @@ export function bass(b: Bus, e: E<'bass'>): void {
 
 /** The 808: a sine that drops onto its note from a little above, rings long, and is saturated into overtones. */
 function eight08(b: Bus, e: E<'bass'>): void {
-  const f = mtof(e.n);
+  const f = b.hz(e.n);
   const rel = e.rel || 0.35;
   let ph = 0;
   b.voice(
@@ -297,7 +296,7 @@ function round_(b: Bus, e: E<'bass'>): void {
     e.t,
     e.d + rel,
     (_j, u) => {
-      ps = (ps + (mtof(e.n) * b.wow(e.t + u)) / b.sr) % 1;
+      ps = (ps + (b.hz(e.n) * b.wow(e.t + u)) / b.sr) % 1;
       const x = sin(TAU * ps) + 0.3 * sin(2 * TAU * ps) + 0.18 * sin(3 * TAU * ps) * exp(-9 * u);
       return tanh(1.3 * x) * e.v * 0.15 * min(1, u / 0.005) * exp(-0.9 * u) *
         (u > e.d ? exp((-6.9 * (u - e.d)) / rel) : 1);
@@ -314,7 +313,7 @@ function round_(b: Bus, e: E<'bass'>): void {
 /** Two detuned saws and a low-pass that snaps shut; the ping-pong echoes do the rest. */
 export function pluck(b: Bus, e: E<'pluck'>): void {
   const flt = new SVF(b.sr, e.cut, 1.3);
-  const f = mtof(e.n);
+  const f = b.hz(e.n);
   const dec = 7.5 * (e.dec ?? 1);
   let p1 = b.noise.unit();
   let p2 = b.noise.unit();
@@ -346,7 +345,7 @@ export function keys(b: Bus, e: E<'keys'>): void {
   const g = (0.26 * e.v) / sqrt(notes.length);
   const rel = 0.22;
   notes.forEach((m, k) => {
-    const f = mtof(m);
+    const f = b.hz(m);
     const t0 = e.t + k * 0.009;
     const idx = 0.7 + 1.6 * e.v;
     let pc = 0;
@@ -411,7 +410,7 @@ export function pad(
     for (let j = 0; j < nv; j++) {
       const x = nv > 1 ? (2 * j) / (nv - 1) - 1 : 0;
       const [a, bb] = pan(x * w * (k % 2 ? -1 : 1));
-      inc.push((mtof(m) * 2 ** ((x * det) / 1200)) / sr);
+      inc.push((b.hz(m) * 2 ** ((x * det) / 1200)) / sr);
       ph.push(b.noise.unit());
       lfo.push(TAU * b.noise.unit());
       gl.push(a * g);
@@ -481,7 +480,7 @@ export function organ(b: Bus, e: E<'organ'>): void {
   const am = [0, 0, 0];
   for (const [c, p] of [[0, 0], [-5, -0.7], [5, 0.7]]) {
     const [a, bb] = pan(p);
-    inc.push((mtof(e.n - 12) * 2 ** (c / 1200)) / sr);
+    inc.push((b.hz(e.n - 12) * 2 ** (c / 1200)) / sr);
     ph.push(b.noise.unit());
     pl.push(a);
     pr.push(bb);
@@ -640,7 +639,7 @@ export function lead(b: Bus, e: E<'lead'>): void {
     const on = u < nt.d * 0.92;
     if (((i - i0) & 15) === 0) {
       pitch += (nt.n - pitch) * kg;
-      const f = (mtof(pitch + vibDepth * smooth((u - 0.2) / 0.3) * sin(TAU * 5.4 * t)) * b.wow(t)) / sr;
+      const f = (b.hz(pitch + vibDepth * smooth((u - 0.2) / 0.3) * sin(TAU * 5.4 * t)) * b.wow(t)) / sr;
       const c = cut + P.env * nt.v * (1 - exp(-u / P.fa)) * exp(-u * P.fd);
       for (const v of V) v[5] = f * v[0];
       fl.set(c);
@@ -674,7 +673,7 @@ export function lead(b: Bus, e: E<'lead'>): void {
 export function bell(b: Bus, e: E<'bell'>): void {
   const ratio = b.tone.fmRatio;
   e.n.forEach((m, k) => {
-    const wc = (TAU * mtof(m)) / b.sr;
+    const wc = (TAU * b.hz(m)) / b.sr;
     // the index and the loudness decay as running gains (one multiply a sample instead of exp())
     const fi = exp(-3 / b.sr);
     const fa = exp(-0.8 / b.sr);
@@ -720,12 +719,13 @@ const IMPACT = {
 
 export function impact(b: Bus, e: E<'impact'>): void {
   const [bg, f0, bd, cg, cd] = IMPACT[e.k];
+  const d1 = b.hz(26);
   let ph = 0;
   b.voice(
     e.t,
     5.5,
     (_j, u) => {
-      ph += (D1 + (f0 - D1) * exp(-7 * u)) / b.sr;
+      ph += (d1 + (f0 - d1) * exp(-7 * u)) / b.sr;
       return tanh(1.6 * sin(TAU * ph)) * bg * 0.55 * e.a * exp(-bd * u) * min(1, u / 0.003);
     },
     0,
@@ -825,7 +825,7 @@ export function riser(b: Bus, e: E<'rise'>): void {
     d,
     (j, u) => {
       if ((j & 31) === 0) {
-        f = mtof(m0 + (m1 - m0) * at(u) ** 1.5) / b.sr;
+        f = b.hz(m0 + (m1 - m0) * at(u) ** 1.5) / b.sr;
         lp.set(min(9000, 175 * 36 ** at(u) + 300));
       }
       let s = 0;
@@ -842,7 +842,7 @@ export function riser(b: Bus, e: E<'rise'>): void {
 
 /** A drone on the tonic with a softly beating octave, fading in from nothing. */
 export function drone(b: Bus, e: E<'drone'>): void {
-  const w = (TAU * mtof(e.n)) / b.sr;
+  const w = (TAU * b.hz(e.n)) / b.sr;
   for (const s of [-1, 1]) {
     b.voice(
       e.t,
