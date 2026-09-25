@@ -15,14 +15,18 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   bridges, solos, builds, drops, breaks and outros. Keys move to close neighbours and styles to related ones. A movement
   often ends by ringing out into a few seconds of rest, like the gap between album tracks; others hand over with a
   reverse swell or a tape stop.
-- **Written, not random.** Each movement invents a hook the way songs do: a one-bar rhythmic cell, heard twice, then let
-  go on a held note, built into phrases in forms songwriters use (question and answer, sentence, AABA, rising sequence)
-  and fitted to the chords under them. Every chorus restates it. Sections end on the chord that leads into the next one,
-  last choruses sometimes lift a key, and silences are written in: stop-time bars, a held breath before a chorus, a
-  dead-silent beat before a drop.
+- **Written, not random.** Each movement invents a hook in its style's idiom (a lyrical line, a trance riff, a sparse
+  film theme) with a planned contour: one climax, the rest reached by step. Phrases are built the way themes are
+  (question and answer, sentence, AABA, rising sequence), each statement continuing from the last, and every chorus
+  restates the hook. Sections end on the chord that leads into the next one, last choruses sometimes lift a key, and
+  silences are written in: stop-time bars, a held breath before a chorus, a dead-silent beat before a drop.
+- **Grooves with a feel.** Each style has a bank of grooves written the way a producer programs them (drums and a bass
+  line that locks with the kick, with verse, chorus and fill bars); a movement draws one and keeps it, and two pieces of
+  a style in a row never share one.
 - **Pieces that build.** A movement is an arc: it starts quiet, every return is bigger, breaks fall back, and the last
-  chorus or drop is the peak. Loudness follows it over a range each style sets (a few LU for lo-fi, up to 18 for
-  cinematic), measured against reference recordings.
+  chorus or drop is the peak. A returning part grows by one thing at a time (a counter-line answering the hook, a layer
+  in the groove, the colour joining) and the peak doubles the hook. Loudness follows it over a range each style sets (a
+  few LU for lo-fi, up to 18 for cinematic), measured against reference recordings.
 - **Nine styles, one band each:** ambient, lo-fi, synthwave, trance, cinematic, acid house, organic downtempo, piano and
   post-rock. A movement keeps its style, its lead voice and one signature texture from start to end; the band grows
   rather than changes. Variety comes from movement to movement.
@@ -30,9 +34,10 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   drums and bass sit where the style wants them against the bed, the melody rides on top, the bed is widened
   (mono-compatibly), and the section is leveled to the loudness its place in the arc calls for.
 - **Instruments, all synthesized:** drums and hand percussion (congas, bongos, cowbell, ride, crash, snaps), supersaw
-  pads, strings, a pipe organ, electric and felt pianos, acoustic and electric guitars (clean, or overdriven through an
-  amp model), harp, marimba, vibraphone, kalimba, bells, flute, saxophone, a hummed voice, a choir, synth leads and
-  basses, an 808 and a 303-style acid line.
+  pads, strings, a pipe organ, a grand and an electric piano, acoustic and electric guitars (clean, or overdriven
+  through an amp model), harp, marimba, vibraphone, kalimba, glockenspiel and bells, flute, saxophone, brass, a hummed
+  voice, a choir, synth leads and basses, an 808 and a 303-style acid line. The acoustic ones are physical and modal
+  models fitted to measurements of real recordings.
 - **A music player.** Play/pause, previous/next movement, a seekable bar showing the movement's form, repeat one
   movement, sleep timer with fade-out, volume, WAV download of the current movement, media keys (and lock-screen
   controls where the browser offers them), keyboard shortcuts, a choice of styles and of composer version.
@@ -45,10 +50,10 @@ files. The same seed plays the same endless song for anyone, so a song is shared
 A seed must keep its song forever, so the composer is versioned and a released version never changes. Seeds and links
 carry their version; new seeds use the latest one, and the seed dialog can switch.
 
-| Version |                                                                                                                                                                       |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| v2      | Longer movements with a choice of length and a real arc, nine styles, many more instruments, hooks that return, turnarounds, written silences, key lifts, a stem mix. |
-| v1      | The original: shorter movements in five styles. Links made before versions existed play v1.                                                                           |
+| Version |                                                                                                                                                                                                                                     |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| v2      | Longer movements with a choice of length and a real arc, nine styles with producer-written grooves, many more instruments modelled on recordings, hooks that return and grow, turnarounds, written silences, key lifts, a stem mix. |
+| v1      | The original: shorter movements in five styles. Links made before versions existed play v1.                                                                                                                                         |
 
 Each version is a sealed engine under `src/engines/vN` behind the port in `src/core/engine.ts`. Tests pin each released
 version's output (plans, scores and audio fingerprints), so an accidental change fails CI. To improve the music, copy
@@ -112,5 +117,10 @@ synthesized sample by sample in plain JavaScript, mixed by measurement rather th
 basses, supersaw, organ, leads, bell, reverb, echo and mastering chain), which infmu adapted and then grew from.
 
 The DSP stands on published work: Freeverb (Jezar at Dreampoint), Vadim Zavalishin's topology-preserving state-variable
-filter, PolyBLEP oscillators, the Karplus-Strong plucked string (with Jaffe and Smith's tuning extensions), and the
-ITU-R BS.1770 loudness measure.
+filter, PolyBLEP oscillators, the Karplus-Strong plucked string (with Jaffe and Smith's extensions, and Välimäki and
+Karjalainen's loss and polarization models), and the ITU-R BS.1770 loudness measure.
+
+The instrument models were fitted to measurements of recordings (used only for measurement, not distributed): the
+University of Iowa Musical Instrument Samples, VSCO 2 Community Edition and VCSL (CC0), FreePats (CC0), the Discord SFZ
+GM bank (Martin HD-28 by Jeff Learman, CC0), and Freesound packs by tim.kahn (CC BY 4.0) and hollandm (CC0). Melody
+statistics were checked against the POP909 dataset (MIT).
