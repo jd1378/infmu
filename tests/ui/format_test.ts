@@ -1,5 +1,5 @@
 import { assertEquals } from '@std/assert';
-import { sectionSeconds } from '../../src/ui/format.ts';
+import { sectionSeconds, styleLabel } from '../../src/ui/format.ts';
 import { engine } from '../../src/engines/index.ts';
 
 Deno.test('the section bar shows each section for as long as it plays', () => {
@@ -13,4 +13,11 @@ Deno.test('the section bar shows each section for as long as it plays', () => {
   }
   // one that doesn't: bars at a steady 4/4
   assertEquals(sectionSeconds({ bpm: 120, sections: [{ role: 'verse', bars: 8, energy: 0.5 }] }), [16]);
+});
+
+Deno.test('a style is shown by its genre', () => {
+  const e = engine(2);
+  const labels = e.styles.map(styleLabel);
+  assertEquals(labels.includes('Post-rock') && labels.includes('Lo-fi') && labels.includes('Organic downtempo'), true);
+  assertEquals(new Set(labels).size, labels.length);
 });

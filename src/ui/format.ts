@@ -10,7 +10,8 @@ const ROLE_LABEL: Record<string, string> = { prechorus: 'Pre-chorus', rest: 'Res
 /** "prechorus" -> "Pre-chorus", "drop" -> "Drop" */
 export const roleLabel = (role: string) => ROLE_LABEL[role] ?? role[0].toUpperCase() + role.slice(1);
 
-export const styleLabel = (s: StyleInfo) => `${s.name}, ${s.genre}`;
+/** A style as the listener knows it: its genre ("Post-rock"), not its name inside the engine. */
+export const styleLabel = (s: StyleInfo) => s.genre[0].toUpperCase() + s.genre.slice(1);
 
 /** How long each section of a movement plays, in seconds: as the engine says, or its bars at a steady 4/4. */
 export const sectionSeconds = (mv: Pick<MovementInfo, 'bpm' | 'sections'>): number[] =>

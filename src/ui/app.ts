@@ -151,7 +151,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
       media.meta(
         `${roman(mv.index + 1)}. ${mv.title}`,
         `infmu, seed ${song.phrase}`,
-        `${mv.style.name} in ${mv.key.label}`,
+        `${styleLabel(mv.style)} in ${mv.key.label}`,
         art,
       );
     }, 1500);
