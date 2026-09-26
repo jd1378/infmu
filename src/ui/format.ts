@@ -1,4 +1,4 @@
-import type { StyleInfo } from '../core/engine.ts';
+import type { MovementInfo, StyleInfo } from '../core/engine.ts';
 
 export function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -11,3 +11,7 @@ const ROLE_LABEL: Record<string, string> = { prechorus: 'Pre-chorus', rest: 'Res
 export const roleLabel = (role: string) => ROLE_LABEL[role] ?? role[0].toUpperCase() + role.slice(1);
 
 export const styleLabel = (s: StyleInfo) => `${s.name}, ${s.genre}`;
+
+/** How long each section of a movement plays, in seconds: as the engine says, or its bars at a steady 4/4. */
+export const sectionSeconds = (mv: Pick<MovementInfo, 'bpm' | 'sections'>): number[] =>
+  mv.sections.map((s) => s.seconds ?? (s.bars * 240) / mv.bpm);

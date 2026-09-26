@@ -25,6 +25,8 @@ export interface SectionInfo {
   bars: number;
   /** 0..1 */
   energy: number;
+  /** Seconds it plays for, when its bars don't all last 240 / bpm (a moving tempo, a time other than 4/4). */
+  seconds?: number;
 }
 
 export interface MovementInfo {

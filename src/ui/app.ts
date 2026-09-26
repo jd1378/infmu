@@ -6,7 +6,7 @@ import type { PlayerPort } from '../core/player.ts';
 import { displaySeed, randomSeedPhrase, roman } from '../core/seed.ts';
 import { engine, isVersion, LATEST_VERSION, LEGACY_VERSION, VERSIONS } from '../engines/index.ts';
 import { Dial } from './dial.ts';
-import { clock, roleLabel, styleLabel } from './format.ts';
+import { clock, roleLabel, sectionSeconds, styleLabel } from './format.ts';
 import { bindMediaSession } from './media.ts';
 import { recentSeeds, rememberSeed, storedVolume, storeVolume } from './storage.ts';
 import { applyTint, tintFor } from './theme.ts';
@@ -89,6 +89,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
   let shownChord = -1;
   let chordChips: number[] = []; // chord span index -> chip index
   let segFills: HTMLElement[] = [];
+  let segSeconds: number[] = [];
   let segEls: HTMLElement[] = [];
 
   let shownKey = '';
@@ -160,10 +161,12 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     el.segments.replaceChildren();
     segFills = [];
     segEls = [];
-    mv.sections.forEach((s) => {
+    // widths in time, so a point on the bar is the moment it shows
+    segSeconds = sectionSeconds(mv);
+    mv.sections.forEach((s, i) => {
       const seg = document.createElement('div');
       seg.className = 'seg';
-      seg.style.flex = `${s.bars} 1 0`;
+      seg.style.flex = `${segSeconds[i]} 1 0`;
       seg.title = roleLabel(s.role);
       const fill = document.createElement('div');
       fill.className = 'fill';
@@ -200,8 +203,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     const t = dragging ?? pos.movementTime;
     el.now.textContent = clock(t);
     let acc = 0;
-    mv.sections.forEach((s, i) => {
-      const d = (s.bars * 240) / mv.bpm;
+    segSeconds.forEach((d, i) => {
       segFills[i].style.width = `${Math.min(100, Math.max(0, ((t - acc) / d) * 100))}%`;
       acc += d;
     });
