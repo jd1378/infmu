@@ -361,9 +361,10 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Ember',
     genre: 'post-rock',
     bpm: [96, 124],
-    meters: [['4/4', 6], ['6/8', 2], ['3/4', 1]],
+    // rarely a waltz: in three, a steady pulse under a major key is a carousel
+    meters: [['4/4', 7], ['6/8', 2], ['3/4', 0.5]],
     swing: [0, 0],
-    modes: [['aeolian', 3], ['ionian', 2], ['lydian', 2], ['dorian', 1]],
+    modes: [['aeolian', 4], ['ionian', 2], ['dorian', 2], ['lydian', 1]],
     // waves, as the references build them: a quiet theme, a long crescendo, a climax held for a long time, a sudden
     // drop to almost nothing, and a second, bigger wave
     forms: [

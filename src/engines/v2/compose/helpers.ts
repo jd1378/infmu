@@ -205,7 +205,9 @@ export function breath(ctx: Ctx, longest: number): number {
 
 /** The band stops for the last beats of the section (up to `longest`), and the room rings (or not) into what's next. */
 export function stopBefore(ctx: Ctx, longest: number, room = true): void {
-  ctx.hush(ctx.duration - breath(ctx, longest) * ctx.beat, ctx.duration, room);
+  const t0 = ctx.duration - breath(ctx, longest) * ctx.beat;
+  if (room) ctx.stop(t0, ctx.duration);
+  else ctx.hush(t0, ctx.duration, false);
 }
 
 /**
@@ -222,13 +224,17 @@ export function leadIn(ctx: Ctx, o: { chance: number; longest: number; room: boo
   const last = !secs.slice(j).some((s) => s.role === next);
   const rng = ctx.rng.fork('lead-in');
   if (last && rng.chance(o.chance)) stopBefore(ctx, o.longest, o.room);
-  else if (rng.chance(0.35)) ctx.push({ i: 'breath', t: ctx.duration - ctx.s16, d: ctx.s16 });
+  // a producer's 16th of breath; a band just lifts off for it
+  else if (rng.chance(0.35)) {
+    if (o.room) ctx.stop(ctx.duration - ctx.s16, ctx.duration);
+    else ctx.push({ i: 'breath', t: ctx.duration - ctx.s16, d: ctx.s16 });
+  }
 }
 
 /** Stop-time: the band plays the downbeat of `bar` together, then holds its breath for most of the bar. */
 export function stopTime(ctx: Ctx, bar: number): void {
   const from = ctx.rng.fork('stop-time').weighted([[2, 1], [4, 2], [6, 3], [8, 3]] as const);
-  ctx.hush(ctx.barAt(bar, from), ctx.barAt(bar + 1), true);
+  ctx.stop(ctx.barAt(bar, from), ctx.barAt(bar + 1));
 }
 
 /**

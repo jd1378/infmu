@@ -25,6 +25,7 @@ export function composeSection(song: Song, index: number): Score {
       return { ...e, ns, t: ns.length ? ns[0].t : e.t } as Ev;
     })
     .filter((e) => !('ns' in e) || e.ns.length > 0)
+    .map((e) => letGo(e, ctx.stops))
     .sort((a, b) => a.t - b.t)
     .map((e) => (clock.steady ? e : played(e, clock)));
   const ref = song.section(index);
@@ -54,4 +55,32 @@ function played(e: Ev, clock: Clock): Ev {
   if ('d' in out && out.d !== undefined) out.d = span(e.t, out.d);
   if ('ns' in out) out.ns = out.ns.map((n) => ({ ...n, t: clock.at(n.t), d: span(n.t, n.d) })) as typeof out.ns;
   return out;
+}
+
+/** What a player holds (and lets go when the band stops); everything else rings on by nature. */
+const held = (e: Ev) =>
+  ['pad', 'organ', 'choir', 'drone', 'lead', 'wind', 'acid', 'rise', 'sweep'].includes(e.i) ||
+  (e.i === 'bass' && e.k !== 'pick' && e.k !== 'finger');
+
+/** An event as the band plays it through its stops: a held sound let go at the first stop it runs into. */
+export function letGo(e: Ev, stops: readonly number[]): Ev {
+  if (!stops.length || !held(e)) return e;
+  const at = (t: number, d: number) => stops.find((s) => s > t + 1e-6 && s < t + d - 1e-6);
+  if ('ns' in e) {
+    const ns = e.ns.map((n) => {
+      const s = at(n.t, n.d);
+      return s === undefined ? n : { ...n, d: s - n.t };
+    });
+    return { ...e, ns } as Ev;
+  }
+  if (!('d' in e) || e.d === undefined) return e;
+  const s = at(e.t, e.d);
+  if (s === undefined) return e;
+  const d = s - e.t;
+  // a riser or a sweep let go where it has got to on its arc
+  if (e.i === 'rise' || e.i === 'sweep') {
+    const [x0, x1] = [e.x0 ?? 0, e.x1 ?? 1];
+    return { ...e, d, x1: x0 + ((x1 - x0) * d) / e.d };
+  }
+  return { ...e, d } as Ev;
 }

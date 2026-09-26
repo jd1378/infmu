@@ -253,9 +253,25 @@ export class Ctx {
     if (t1 > t0) this.silences.push({ t0, t1 });
   }
 
+  /** When the band stops as players do (see stop()): what they hold is let go at these times. */
+  readonly stops: number[] = [];
+
   /**
-   * A written silence from `t0` to `t1` seconds: nothing new starts, everything sounding is cut, and the
-   * room rings on (or, with room false, falls silent too). Silence is part of the music, not a gap in it.
+   * The band stops from `t0` to `t1` as players do: nothing new starts, what they hold (pads, organ, a choir,
+   * winds, synth notes, risers) is let go at t0 and fades by its own release, and what rings by nature (plucked
+   * and struck strings, the piano, bells, cymbals, the room) rings on. Silence is part of the music, not a hole in
+   * it.
+   */
+  stop(t0: number, t1: number): void {
+    if (t1 <= t0) return;
+    this.silences.push({ t0, t1 });
+    this.stops.push(t0);
+  }
+
+  /**
+   * A cut from `t0` to `t1` seconds: nothing new starts, everything sounding is cut dead, and the room rings on (or,
+   * with room false, falls silent too). A producer's move (the dead silence before a drop), not a player's: a band
+   * stops with stop().
    */
   hush(t0: number, t1: number, room = true): void {
     if (t1 <= t0) return;

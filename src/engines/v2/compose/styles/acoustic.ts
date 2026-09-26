@@ -289,7 +289,7 @@ export function nocturne(ctx: Ctx): void {
   // a fermata: the music holds its breath on the last beat of a phrase, then goes on
   const breathe = () => {
     if (bars >= 8 && ctx.rng.fork('fermata').chance(0.12)) {
-      ctx.hush(ctx.barAt(4) - breath(ctx, 1) * ctx.beat, ctx.barAt(4), true);
+      ctx.stop(ctx.barAt(4) - breath(ctx, 1) * ctx.beat, ctx.barAt(4));
     }
   };
 

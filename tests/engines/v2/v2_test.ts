@@ -1,5 +1,5 @@
 import { assert, assertAlmostEquals, assertEquals, assertNotEquals } from '@std/assert';
-import { composeSection } from '../../../src/engines/v2/compose/index.ts';
+import { composeSection, letGo } from '../../../src/engines/v2/compose/index.ts';
 import { Ctx, sectionChords, sectionKey } from '../../../src/engines/v2/compose/context.ts';
 import { perform } from '../../../src/engines/v2/compose/perform.ts';
 import { barSeconds, Song } from '../../../src/engines/v2/plan.ts';
@@ -225,9 +225,12 @@ Deno.test('every chorus of a movement restates the same hook on the same voice',
         e,
       ) => ('ns' in e ? e.ns.map((n) => [n.t, n.n]) : [[e.t, [(e as { n: number | number[] }).n].flat()[0]]]))
       .sort((a, b) => a[0] - b[0]);
-    const notes = all
+    // a tremolo is one note however many strokes it takes (the tempo decides how many fit)
+    const runs = all.filter(([t, n], i) => !(i && n === all[i - 1][1] && t - all[i - 1][0] < 0.25));
+    const notes = runs
       // a grace note leaning into the next is how a return is played, not what it plays
-      .filter(([t], i) => !(all[i + 1] && all[i + 1][0] - t < 0.1))
+      .filter(([t], i) => !(runs[i + 1] && runs[i + 1][0] - t < 0.1))
+      .filter(([, n], i, kept) => !(i && n === kept[i - 1][1]))
       // the first four bars, to half a 16th before the fifth: written notes sit on the grid, performed ones move less
       .filter(([t]) => t < s.bars[4] - 60 / s.bpm / 8);
     // the first four bars as intervals (independent of a key lift; the ending may turn towards what comes next)
@@ -862,7 +865,7 @@ Deno.test('some pieces sway in three: waltzes and 6/8, with bars of three beats 
   assert(tune.length > 6 && onBeat / tune.length > 0.5, `${onBeat} of ${tune.length} notes on a beat`);
 });
 
-Deno.test('post-rock rises in long waves: quiet without drums, a crescendo, the theme tremolo-picked over a wall', () => {
+Deno.test('post-rock rises in long waves: quiet without drums, a crescendo, a slow tremolo theme over a wall', () => {
   for (const seed of ['wave-a', 'wave-b', 'wave-c']) {
     const song = new Song(seed, ['ember'], 'standard');
     const mv = song.movement(0);
@@ -882,10 +885,24 @@ Deno.test('post-rock rises in long waves: quiet without drums, a crescendo, the 
       if (sec.role === 'drop' || sec.role === 'chorus') {
         const wall = s.events.filter((e): e is Extract<Ev, { i: 'string' }> => e.i === 'string' && e.k === 'overdrive');
         assert(wall.some((e) => (e.p ?? 0) < 0) && wall.some((e) => (e.p ?? 0) > 0), 'the wall is one guitarist');
-        // the tune: the same note picked again and again
+        // the tune: slow, its long notes tremolo-picked, but moving through the scale (not one note hammered for bars)
         const tune = s.events.filter(isMelody).map((e) => e as Extract<Ev, { i: 'string' }>).sort((a, b) => a.t - b.t);
         const again = tune.filter((e, j) => j > 0 && e.n === tune[j - 1].n && e.t - tune[j - 1].t < 0.2).length;
-        assert(tune.length > 20 && again / tune.length > 0.5, `${seed}: ${again} of ${tune.length} strokes repeat`);
+        assert(tune.length > 20 && again / tune.length > 0.25, `${seed}: ${again} of ${tune.length} strokes repeat`);
+        let held = 0;
+        for (let j = 1, from = tune[0].t; j < tune.length; j++) {
+          if (tune[j].n === tune[j - 1].n) continue;
+          held = Math.max(held, tune[j].t - from);
+          from = tune[j].t;
+        }
+        assert(new Set(tune.map((e) => e.n)).size >= 4, `${seed}: the tune has too few notes`);
+        assert(held <= 4 * barSeconds(mv), `${seed}: the tune holds one note for ${held.toFixed(1)} s`);
+        // and the bass drives the chords' roots: a bass that bounces to the fifth and the octave is a polka
+        for (const e of s.events) {
+          if (e.i !== 'bass') continue;
+          const c = s.chords.find((c) => e.t >= c.t - 0.05 && e.t < c.t + c.d - 0.05);
+          assert(!c || c.pcs.length < 2 || (e.n - c.pcs[0]) % 12 === 0, `${seed}: bass ${e.n} under ${c?.name}`);
+        }
       }
     });
   }
@@ -916,5 +933,38 @@ Deno.test('a build stops before a climax rarely: only before the last one, and b
       stops += here;
     }
     assert(stops < 8, `${style}: every piece stops before its climax`);
+  }
+});
+
+Deno.test('a band stops as players do: held sounds are let go, ringing ones ring on, nothing is cut', () => {
+  const stop = [2];
+  const pad = letGo({ i: 'pad', t: 0, d: 4, n: [60, 64, 67], k: 'warm', cut: [800, 1200] }, stop);
+  assertEquals((pad as { d: number }).d, 2);
+  const piano = letGo({ i: 'piano', t: 1, d: 3, n: [48, 60], v: 0.6 }, stop);
+  assertEquals((piano as { d: number }).d, 3, 'the piano was stopped');
+  const guitar = letGo({ i: 'string', t: 1.5, n: 52, v: 0.7, k: 'clean', d: 2 }, stop);
+  assertEquals((guitar as { d: number }).d, 2, 'the string was choked');
+  const flute = letGo({
+    i: 'wind',
+    t: 0,
+    k: 'flute',
+    ns: [{ t: 0, d: 1, n: 72, v: 0.8 }, { t: 1, d: 3, n: 74, v: 0.8 }],
+  }, stop);
+  assertEquals((flute as { ns: { d: number }[] }).ns.map((n) => n.d), [1, 1]);
+  const rise = letGo({ i: 'rise', t: 0, d: 4, k: 'build', x0: 0, x1: 1 }, stop) as { d: number; x1: number };
+  assertEquals([rise.d, rise.x1], [2, 0.5]);
+  assertEquals(letGo({ i: 'bass', t: 0, d: 4, n: 40, v: 0.8, k: 'pick' }, stop), {
+    i: 'bass',
+    t: 0,
+    d: 4,
+    n: 40,
+    v: 0.8,
+    k: 'pick',
+  });
+  // and a band's stop is not a cut: no section of a band style mutes everything
+  for (const style of ['ember', 'nocturne', 'haze', 'garden', 'cathedral'] as const) {
+    for (const s of sectionsOf(`stops-${style}`, style)) {
+      assert(!s.events.some((e) => e.i === 'gap' && e.t + e.d < s.duration - 0.01), `${style} cuts dead`);
+    }
   }
 });

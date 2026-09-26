@@ -342,16 +342,21 @@ export function ember(ctx: Ctx): void {
     }
   };
   // two clean guitars that interlock through the dotted-eighth delay: the first picks eighths through the chord
-  // (a few notes a bar when quiet), the second rings the drones on a dotted grid against it, three against four
+  // (a few notes a bar when quiet), the second rings the drones on a dotted grid against it, three against four.
+  // Each piece has its own figures, kept as a guitarist keeps a riff: the chords move them (figures that change
+  // every bar, or climb and fall a note at a time, go round like a music box)
+  const figures = mrng.fork('figures');
+  const quietFigure = figures.pick([[0, -1, 3, -1], [0, -1, -1, 3, -1, -1, 2, -1], [0, -1, 2, -1, 3, -1, -1, -1]]);
+  const denseFigure = figures.pick([[0, 2, 3, 4, 3, 2], [0, 3, 2, 4, 3, 2], [0, 2, 4, 3, 2, 3]]);
+  const droneFigure = figures.pick([[2, 1, 0, 1], [2, 0, 1, 0]]);
   const shimmer = (b: number, v: number, dense = false) => {
     const ns = droneVoicing(ctx, ctx.chordAt(b));
-    if (dense) pickNotes(ctx, b, 'clean', ns, [0, 2, 3, 4, 3, 2], 2, v, -0.4);
-    else pickNotes(ctx, b, 'clean', ns, [0, -1, -1, 3, -1, -1, 2, -1], 4, v, -0.4);
+    if (dense) pickNotes(ctx, b, 'clean', ns, denseFigure, 2, v, -0.4);
+    else pickNotes(ctx, b, 'clean', ns, quietFigure, 4, v, -0.4);
   };
   const interlock = (b: number, v: number) => {
-    const ns = droneVoicing(ctx, ctx.chordAt(b));
-    const top = ns.slice(-3);
-    pickNotes(ctx, b, 'clean', top, [2, 1, 0, 1], ctx.mv.meter === '4/4' ? 6 : 4, v, 0.45);
+    const top = droneVoicing(ctx, ctx.chordAt(b)).slice(-3);
+    pickNotes(ctx, b, 'clean', top, droneFigure, ctx.mv.meter === '4/4' ? 6 : 4, v, 0.45);
   };
   // the wall: power chords held through each chord, a guitarist each side
   const wall = (v: number, from = 0, to = bars) => {
@@ -378,6 +383,8 @@ export function ember(ctx: Ctx): void {
   // the bass guitar, re-picked as a bassist plays (a real string dies away; it isn't a pad): fingered on the strong
   // beats in the quiet, picked on the beats as a build starts, driving picked eighths into and through a climax
   const onStrongs: BassHit[] = ctx.strongs.map((s, i, all) => [s, (all[i + 1] ?? ctx.spb) - s, 0, i ? 0.85 : 1]);
+  // on the root throughout, moving with the chords: a bass that bounces to the fifth and the octave is a polka, or a
+  // carousel in three
   const onBeats: BassHit[] = [...Array(ctx.spb).keys()].filter((s) => ctx.onBeat(s))
     .map((s) => [s, ctx.mv.meter === '6/8' ? 6 : 4, 0, ctx.strong(s) ? 1 : 0.8]);
   const eighths: BassHit[] = EIGHTHS.filter(([s]) => s < ctx.spb);
@@ -391,12 +398,19 @@ export function ember(ctx: Ctx): void {
     play(ctx, 'string:clean', ns, gain);
     if (glock) play(ctx, 'bell', ns.map((n) => ({ ...n, n: n.n + 12 })), gain * 0.35, false);
   };
-  // the theme at a climax: tremolo-picked on the lead guitar, and an octave up on the clean one
+  // the theme at a climax, as slow and wide as in the quiet: its notes of a bar or more tremolo-picked on the lead
+  // guitar, the rest picked once and sung with vibrato (a whole theme tremolo-picked is one note hammered for bars);
+  // an octave up on the clean guitar, tremolo there only at the final climax
   const soar = (v: number) => {
     const ns = line();
+    const long = ns.filter((n) => n.d >= ctx.bar);
+    const short = ns.filter((n) => n.d < ctx.bar);
     // picked softly: a tremolo is a shimmer inside the wall, not a row of hard attacks on top of it
-    tremolo(ctx, ns, 'clean', v * 0.65, { lead: true });
-    tremolo(ctx, ns.map((n) => ({ ...n, n: n.n + 12 })), 'clean', v * 0.3, { fast: ctx.finalTurn, p: 0.3 });
+    tremolo(ctx, long, 'clean', v * 0.65, { lead: true });
+    play(ctx, 'string:clean', short, v * 0.75);
+    const up = ns.map((n) => ({ ...n, n: n.n + 12 }));
+    if (ctx.finalTurn) tremolo(ctx, up, 'clean', v * 0.3, { p: 0.3 });
+    else play(ctx, 'string:clean', up, v * 0.3, false);
   };
 
   switch (ctx.role) {
@@ -436,16 +450,14 @@ export function ember(ctx: Ctx): void {
       // past halfway the guitar tremolos the chord tones and the wall comes in
       const half = Math.max(0, Math.min(bars, Math.ceil(ctx.runBars / 2 - ctx.runStartBar)));
       if (half < bars) {
-        tremolo(
-          ctx,
-          ctx.chords.filter((c) => c.bar + c.bars > half).flatMap((c) => {
-            const at = Math.max(half, c.bar);
-            const top = droneVoicing(ctx, c).slice(-2);
-            return top.map((n) => ({ t: ctx.barAt(at), d: (c.bar + c.bars - at) * ctx.bar, n, v: 0.8 }));
-          }),
-          'clean',
-          0.5,
-        );
+        // one chord tone a chord, higher in the chord as the run goes on, so the line climbs with the crescendo
+        const climb = ctx.chords.filter((c) => c.bar + c.bars > half).map((c) => {
+          const at = Math.max(half, c.bar);
+          const ns = droneVoicing(ctx, c).slice(1);
+          const n = ns[Math.min(ns.length - 1, Math.floor(Math.max(0, 2 * x(at) - 1) * ns.length))];
+          return { t: ctx.barAt(at), d: (c.bar + c.bars - at) * ctx.bar, n, v: 0.8 };
+        });
+        tremolo(ctx, climb, 'clean', 0.5);
         wall(0.55, half, bars);
       }
       if (ctx.runAt(1) >= 0.75) runRoll(ctx, 0.3, 0.9, 'acoustic');
