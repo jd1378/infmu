@@ -20,11 +20,13 @@ const FIGURES: readonly (readonly number[])[] = [
   [0, 7, 4, 2, 0, 7, 4, 2],
 ];
 
-/** Where a figure's groups of eighths start, in 16ths: 3 + 3 + 2 in four. */
+/** Where a figure's groups of eighths start, in 16ths: 3 + 3 + 2 in four, 3 + 3 + 2 + 2 in five. */
 const GROUPS: Record<Meter, readonly number[]> = {
   '4/4': [0, 6, 12],
   '3/4': [0, 4, 8],
   '6/8': [0, 6],
+  '5/4': [0, 6, 12, 16],
+  '7/8': [0, 4, 8],
 };
 
 /** Who plays a style's ostinato, and around which note (the tonic nearest it). */

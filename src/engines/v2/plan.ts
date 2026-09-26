@@ -61,10 +61,17 @@ export class Song {
   readonly seed: number;
   readonly styles: readonly StyleId[];
   readonly length: Length;
+  readonly character: Character;
   private readonly movements: Movement[] = [];
 
-  constructor(phrase: string, styles: readonly StyleId[] = STYLE_IDS, length: Length = 'standard') {
+  constructor(
+    phrase: string,
+    styles: readonly StyleId[] = STYLE_IDS,
+    length: Length = 'standard',
+    character: Character = 'adventurous',
+  ) {
     this.length = length;
+    this.character = character;
     this.phrase = normalizeSeed(phrase);
     this.seed = seedNumber(this.phrase);
     const allowed = STYLE_IDS.filter((s) => styles.includes(s));
@@ -145,8 +152,13 @@ export class Song {
 
     // the feeling first: key, tempo, chords, sound and room follow from it (see moods.ts). Not the last piece's, and
     // only one the style's modes can carry
-    const moods = style.moods.filter((x) => x !== prev?.mood && moodModes(style.modes, x).length);
-    const mood: Mood = rng.fork('mood').pick(moods.length ? moods : style.moods);
+    const steady = this.character === 'steady';
+    const moods = style.moods.filter((x) =>
+      x !== prev?.mood && moodModes(style.modes, x).length && (!steady || CALM_MOODS.has(x))
+    );
+    const mood: Mood = rng.fork('mood').pick(
+      moods.length ? moods : style.moods.filter((x) => !steady || CALM_MOODS.has(x)),
+    );
     const feel = MOODS[mood];
     const motion: Motion = rng.fork('motion').weighted(style.motions.map((x) => [x, feel.motion[x] ?? 0.25] as const));
     const modes = moodModes(style.modes, mood);
@@ -179,7 +191,8 @@ export class Song {
     // the story the piece tells: not the one the piece before told, and a loud opening only after a piece that
     // didn't fade away (never the very first)
     const arcs = style.arcs.filter((a) =>
-      a !== prev?.arc && (!LOUD_OPENINGS.has(a) || (prev !== null && prev.transition !== 'fade'))
+      a !== prev?.arc && (!LOUD_OPENINGS.has(a) || (prev !== null && prev.transition !== 'fade')) &&
+      (!steady || STEADY_ARCS.has(a))
     );
     // the moment it is remembered by, or none: one its style and mood allow, not the kind either piece before had
     const lately = this.movements.slice(Math.max(0, m - 2), m).map((x) => x.surprise);
@@ -188,7 +201,7 @@ export class Song {
     const kinds = (Object.entries(feel.surprises) as [Surprise, number][]).filter(([k]) => fits(k));
     // (drawn, then the others it allows in turn, for a form with no room for it)
     const first = rng.fork('surprise').weighted<Surprise | null>([[null, 0.5], ...kinds]);
-    const surprises = first ? [first, ...kinds.map(([k]) => k).filter((k) => k !== first)] : [];
+    const surprises = first && !steady ? [first, ...kinds.map(([k]) => k).filter((k) => k !== first)] : [];
     // one drawn, then the others in turn, for a form that can't tell it (see tells())
     const drawn: Arc = rng.fork('arc family').pick(arcs.length ? arcs : ['climb']);
     let planned!: ReturnType<typeof planForm>;
@@ -270,7 +283,7 @@ export class Song {
       chorus = tint(lift);
     }
     // an ending that doesn't come home, as the mood allows
-    const ending = rng.fork('ending').chance(feel.open) ? 'open' : 'home';
+    const ending = rng.fork('ending').chance(feel.open) && !steady ? 'open' : 'home';
 
     const t = rng.fork('tone');
     const tone = {
@@ -346,6 +359,16 @@ export class Song {
     };
   }
 }
+
+/**
+ * How far the music ranges, as the listener chooses: `adventurous`, every mood a style has (sad and tense ones too),
+ * every arc, surprises and open endings; `steady`, for listening in the background: calm moods, arcs that grow or
+ * hold, no surprises, and every piece coming home.
+ */
+export const CHARACTERS = ['adventurous', 'steady'] as const;
+export type Character = typeof CHARACTERS[number];
+const CALM_MOODS: ReadonlySet<Mood> = new Set(['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'joy']);
+const STEADY_ARCS: ReadonlySet<Arc> = new Set(['climb', 'early', 'plateau']);
 
 /** How many movements back the journey remembers, so it doesn't repeat itself. */
 const RECENT = 4;

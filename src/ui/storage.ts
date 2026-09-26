@@ -8,6 +8,7 @@ export interface RecentSeed {
   seed: string;
   version: number;
   length?: string;
+  character?: string;
 }
 
 interface Stored {
@@ -34,12 +35,13 @@ function read(): Stored {
 function toRecent(x: unknown): RecentSeed | null {
   if (typeof x === 'string') return normalizeSeed(x) ? { seed: normalizeSeed(x), version: 1 } : null;
   if (!x || typeof x !== 'object') return null;
-  const { seed, version, length } = x as Record<string, unknown>;
+  const { seed, version, length, character } = x as Record<string, unknown>;
   if (typeof seed !== 'string' || !normalizeSeed(seed)) return null;
   return {
     seed: normalizeSeed(seed),
     version: Number.isInteger(version) && (version as number) >= 1 ? version as number : 1,
     length: typeof length === 'string' && /^[a-z]{1,16}$/.test(length) ? length : undefined,
+    character: typeof character === 'string' && /^[a-z]{1,16}$/.test(character) ? character : undefined,
   };
 }
 
@@ -55,10 +57,13 @@ export const storedVolume = (): number | undefined => read().volume;
 export const storeVolume = (volume: number) => write({ volume });
 
 export const recentSeeds = (): RecentSeed[] => (read().recent ?? []).slice(0, 8);
-export const rememberSeed = (seed: string, version: number, length: string) =>
+export const rememberSeed = (seed: string, version: number, length: string, character: string) =>
   write({
     recent: [
-      { seed, version, length },
-      ...recentSeeds().filter((r) => r.seed !== seed || r.version !== version || (r.length ?? 'standard') !== length),
+      { seed, version, length, character },
+      ...recentSeeds().filter((r) =>
+        r.seed !== seed || r.version !== version || (r.length ?? 'standard') !== length ||
+        (r.character ?? 'adventurous') !== character
+      ),
     ].slice(0, 8),
   });

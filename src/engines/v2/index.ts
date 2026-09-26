@@ -4,7 +4,7 @@
 
 import type { Cue, Engine, KeyInfo, MovementInfo, SectionScore, SongPlan, StyleInfo } from '../../core/engine.ts';
 import { composeSection } from './compose/index.ts';
-import { type Length, LENGTHS, Song } from './plan.ts';
+import { type Character, CHARACTERS, type Length, LENGTHS, Song } from './plan.ts';
 import { STYLE_IDS, STYLES } from './styles.ts';
 import { renderScore } from './synth/render.ts';
 import { renderSpan } from './synth/span.ts';
@@ -28,13 +28,17 @@ class Plan implements SongPlan {
   get length(): string {
     return this.song.length;
   }
+  get character(): string {
+    return this.song.character;
+  }
   private readonly infos = new WeakMap<Movement, MovementInfo>();
 
-  constructor(phrase: string, styles?: readonly string[], length?: string) {
+  constructor(phrase: string, styles?: readonly string[], length?: string, character?: string) {
     this.song = new Song(
       phrase,
       styles?.filter((s): s is StyleId => (STYLE_IDS as string[]).includes(s)),
       length && length in LENGTHS ? (length as Length) : 'standard',
+      (CHARACTERS as readonly string[]).includes(character ?? '') ? (character as Character) : 'adventurous',
     );
   }
 
@@ -164,7 +168,11 @@ export const v2: Engine = {
     { id: 'short', label: 'Short, about 2 minutes' },
     { id: 'long', label: 'Long, 5 to 6 minutes' },
   ],
-  song: (phrase, styles, length) => new Plan(phrase, styles, length),
+  characters: [
+    { id: 'adventurous', label: 'Adventurous: every mood, sad and tense ones too, and surprises' },
+    { id: 'steady', label: 'Steady: calm moods, familiar shapes, no surprises' },
+  ],
+  song: (phrase, styles, length, character) => new Plan(phrase, styles, length, character),
   score(song, index): SectionScore {
     const p = plan(song);
     const s = composeSection(p.song, index);

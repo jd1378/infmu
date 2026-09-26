@@ -99,6 +99,8 @@ export interface SongPlan {
   readonly styles: readonly string[];
   /** The listener's choice of movement length ('standard' unless the engine offers others). */
   readonly length: string;
+  /** The listener's choice of the music's range ('adventurous' unless the engine offers others). */
+  readonly character: string;
   movement(m: number): MovementInfo;
   section(i: number): SectionRef;
   locate(m: number, t: number): { index: number; offset: number };
@@ -129,7 +131,9 @@ export interface Engine {
   readonly styles: readonly StyleInfo[];
   /** Movement lengths a listener can choose from (the first is the default); absent when fixed. */
   readonly lengths?: readonly { id: string; label: string }[];
-  song(phrase: string, styles?: readonly string[], length?: string): SongPlan;
+  /** How far the music may range, as a listener can choose (the first is the default); absent when fixed. */
+  readonly characters?: readonly { id: string; label: string }[];
+  song(phrase: string, styles?: readonly string[], length?: string, character?: string): SongPlan;
   score(song: SongPlan, index: number): SectionScore;
   render(song: SongPlan, index: number, sampleRate: number): Rendered;
   /** Sections [from, from + count) played back to back with their tails, as the player hears them. */

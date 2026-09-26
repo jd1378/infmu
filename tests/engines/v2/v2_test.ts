@@ -17,10 +17,20 @@ import { piano } from '../../../src/engines/v2/synth/modal.ts';
 import { balanceLift, early, melodyOffset, renderScore, tape } from '../../../src/engines/v2/synth/render.ts';
 import { string } from '../../../src/engines/v2/synth/strings.ts';
 import { wind } from '../../../src/engines/v2/synth/voice.ts';
+import { engine } from '../../../src/engines/index.ts';
 import { Rng } from '../../../src/engines/v2/rng.ts';
 import { Clock, tempoAt } from '../../../src/engines/v2/tempo.ts';
 import { mod, MODES, pc } from '../../../src/engines/v2/theory.ts';
-import { type Arc, type Ev, isMelody, type Role, type StyleId, TAKES } from '../../../src/engines/v2/types.ts';
+import {
+  type Arc,
+  BEATS,
+  type Ev,
+  isMelody,
+  type Role,
+  STRONGS,
+  type StyleId,
+  TAKES,
+} from '../../../src/engines/v2/types.ts';
 
 Deno.test('movements run as long as the listener chose', () => {
   const bounds = { short: [95, 175], standard: [165, 265], long: [265, 400] } as const;
@@ -1546,4 +1556,80 @@ Deno.test('a piece may be built on one idea: an ostinato on fixed notes, or loop
     }
   }
   assert(seen.ostinato > 10 && seen.phase > 5 && seen.none > seen.ostinato, JSON.stringify(seen));
+});
+
+Deno.test('a steady song stays calm: no sad or tense moods, arcs that grow or hold, no surprises, always home', () => {
+  const calm = new Set(['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'joy']);
+  for (let k = 0; k < 20; k++) {
+    const steady = new Song(`steady-${k}`, STYLE_IDS, 'standard', 'steady');
+    for (let m = 0; m < 10; m++) {
+      const mv = steady.movement(m);
+      assert(calm.has(mv.mood), `${mv.style}: ${mv.mood}`);
+      assert(['climb', 'early', 'plateau'].includes(mv.arc), `${mv.style}: ${mv.arc}`);
+      assertEquals([mv.surprise, mv.ending], [null, 'home']);
+    }
+  }
+  // and the adventurous default is the song it always was
+  const a = new Song('same-song');
+  const b = new Song('same-song', STYLE_IDS, 'standard', 'adventurous');
+  assertEquals(
+    JSON.stringify([0, 1, 2].map((m) => a.movement(m))),
+    JSON.stringify([0, 1, 2].map((m) => b.movement(m))),
+  );
+  assertEquals(engine(2).song('x', undefined, undefined, 'steady').character, 'steady');
+  assertEquals(engine(2).song('x', undefined, undefined, 'wild').character, 'adventurous');
+});
+
+Deno.test('some pieces are in five or seven: bars of 20 or 14 sixteenths, drums on their groups, tunes in them', () => {
+  const seen = new Set<string>();
+  for (const style of ['ember', 'cathedral', 'nocturne'] as const) {
+    for (let k = 0; k < 60; k++) seen.add(`${style} ${new Song(`odd-${style}-${k}`, [style]).movement(0).meter}`);
+  }
+  for (const s of ['ember 7/8', 'ember 5/4', 'cathedral 5/4', 'nocturne 5/4']) assert(seen.has(s), `no ${s}`);
+  for (const id of STYLE_IDS) {
+    if (['ember', 'cathedral', 'nocturne'].includes(id)) continue;
+    assert(!STYLES[id].meters.some(([m]) => m === '5/4' || m === '7/8'), `${id} in an odd time`);
+  }
+  // every groove in five or seven fits its bar
+  for (const banks of [EMBER_TIMES, CATHEDRAL_TIMES]) {
+    for (const [meter, steps] of [['5/4', 20], ['7/8', 14]] as const) {
+      assert(banks[meter]?.length, `no grooves in ${meter}`);
+      for (const [g] of banks[meter]!) {
+        for (const bar of [g.light, g.full, g.fill, g.answer, g.layer]) {
+          for (const lane of Object.values(bar ?? {})) assertEquals((lane as string).length, steps, g.name);
+        }
+        for (const [step, len] of [...g.bassLight, ...g.bassFull]) assert(step + len <= steps, `${g.name} bass`);
+      }
+    }
+  }
+  // a piece in seven: bar lines three and a half beats apart, every section's notes inside its bars, and the kick
+  // on the groups of two, two and three
+  for (
+    const [style, meter, quarters] of [['ember', '7/8', 3.5], ['cathedral', '5/4', 5], ['nocturne', '5/4', 5]] as const
+  ) {
+    let song: Song | undefined;
+    for (let k = 0; k < 200 && !song; k++) {
+      const s = new Song(`odd-${style}-${k}`, [style]);
+      if (s.movement(0).meter === meter) song = s;
+    }
+    assert(song, `no ${style} in ${meter}`);
+    const mv = song.movement(0);
+    assertAlmostEquals(barSeconds(mv), quarters * (60 / mv.bpm), 1e-9);
+    let kicks = 0;
+    let onGroups = 0;
+    mv.sections.forEach((_, i) => {
+      const sc = composeSection(song!, mv.firstSection + i);
+      const clock = new Clock(mv, sc.local);
+      for (const e of sc.events) {
+        if (e.i !== 'kick') continue;
+        const q = clock.written(e.t) / (60 / mv.bpm / 4);
+        const step = ((Math.round(q) % (4 * quarters)) + 4 * quarters) % (4 * quarters);
+        kicks++;
+        if (STRONGS[meter].includes(step) || BEATS[meter].includes(step)) onGroups++;
+      }
+    });
+    if (style !== 'nocturne') {
+      assert(kicks > 20 && onGroups / kicks > 0.8, `${style}: ${onGroups} of ${kicks} kicks on groups`);
+    }
+  }
 });

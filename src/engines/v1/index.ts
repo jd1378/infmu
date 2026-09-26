@@ -23,6 +23,7 @@ const keyInfo = (key: Key): KeyInfo => ({
 class Plan implements SongPlan {
   readonly version = 1;
   readonly length = 'standard';
+  readonly character = 'adventurous';
   readonly song: Song;
   private readonly infos = new WeakMap<Movement, MovementInfo>();
 

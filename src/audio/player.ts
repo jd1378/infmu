@@ -191,6 +191,7 @@ export class WebPlayer implements PlayerPort {
       phrase: this.song.phrase,
       styles: [...this.song.styles],
       length: this.song.length,
+      character: this.song.character,
       from: mv.firstSection,
       count: mv.sections.length,
       sampleRate,
@@ -345,6 +346,7 @@ export class WebPlayer implements PlayerPort {
         phrase: this.song.phrase,
         styles: [...this.song.styles],
         length: this.song.length,
+        character: this.song.character,
         index,
         sampleRate: ctx.sampleRate,
       }).then((r) => {

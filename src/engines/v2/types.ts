@@ -66,13 +66,32 @@ export type Space = 'close' | 'room' | 'hall' | 'cathedral';
 export type Treatment = 'hushed' | 'bare';
 
 /**
- * A movement's time: four beats, a waltz's three, or two lilting beats of three eighths each. Both triple times
- * have twelve 16ths in a bar; the movement's bpm counts quarter notes in all three.
+ * A movement's time: four beats, a waltz's three, two lilting beats of three eighths each (6/8), five beats grouped
+ * three and two (5/4), or seven eighths grouped two, two and three (7/8). The movement's bpm counts quarter notes in
+ * all of them.
  */
-export type Meter = '4/4' | '3/4' | '6/8';
+export type Meter = '4/4' | '3/4' | '6/8' | '5/4' | '7/8';
 
 /** 16ths in a bar of `meter`. */
-export const stepsPerBar = (meter: Meter): 12 | 16 => (meter === '4/4' ? 16 : 12);
+export const stepsPerBar = (meter: Meter): number => ({ '4/4': 16, '3/4': 12, '6/8': 12, '5/4': 20, '7/8': 14 })[meter];
+
+/** The 16th each beat of a bar starts on: its quarters; 6/8's two dotted quarters; 7/8's groups of 2, 2 and 3 eighths. */
+export const BEATS: Record<Meter, readonly number[]> = {
+  '4/4': [0, 4, 8, 12],
+  '3/4': [0, 4, 8],
+  '6/8': [0, 6],
+  '5/4': [0, 4, 8, 12, 16],
+  '7/8': [0, 4, 8],
+};
+
+/** Where a bar leans: one and three in four, a waltz's downbeat, both of 6/8's beats, 5/4's three and two, 7/8's long group. */
+export const STRONGS: Record<Meter, readonly number[]> = {
+  '4/4': [0, 8],
+  '3/4': [0],
+  '6/8': [0, 6],
+  '5/4': [0, 12],
+  '7/8': [0, 8],
+};
 
 export interface SectionDef {
   role: Role;

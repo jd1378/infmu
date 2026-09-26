@@ -7,8 +7,10 @@ import { engine } from './engines/index.ts';
 let cached: { key: string; song: SongPlan } | null = null;
 
 function songFor(req: RenderRequest): SongPlan {
-  const key = `${req.version}|${req.phrase}|${req.styles.join(',')}|${req.length}`;
-  if (cached?.key !== key) cached = { key, song: engine(req.version).song(req.phrase, req.styles, req.length) };
+  const key = `${req.version}|${req.phrase}|${req.styles.join(',')}|${req.length}|${req.character}`;
+  if (cached?.key !== key) {
+    cached = { key, song: engine(req.version).song(req.phrase, req.styles, req.length, req.character) };
+  }
   return cached.song;
 }
 

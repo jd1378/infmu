@@ -115,7 +115,7 @@ const COLORS: Record<ColorId, Color> = {
     write: (ctx, v) =>
       bars(ctx, (b) => {
         const top = ctx.chordAt(b).voicing.slice(-3).map((n) => n + 12);
-        for (const s of [0, ctx.spb === 12 && ctx.mv.meter === '3/4' ? 4 : ctx.spb / 2]) {
+        for (const s of ctx.mv.meter === '3/4' ? [0, 4] : ctx.strongs) {
           for (const n of top) ctx.push({ i: 'mallet', t: ctx.barAt(b, s), n, v: v * 0.6, k: 'vibes' });
         }
       }),

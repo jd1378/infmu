@@ -1087,6 +1087,39 @@ export const EMBER_TIMES: Banks = {
       bassFull: [[0, 12, 0, 1]],
     }, 1],
   ],
+  // five as three and two: the snare on the four, where the bar turns
+  '5/4': [
+    [{
+      name: 'five wash',
+      light: { lo: 'x.x.x.x.x.x.x.x.x.x.', kick: 'x...........x.......' },
+      full: { kick: 'x.....x.....x.......', snare: '............x.......', crash: 'x.o.x.o.x.o.x.o.x.o.' },
+      fill: { snare: '............x.x.xxxx', crash: 'x.o.x.o.x.o.........' },
+      layer: { lo: 'x...x...x...x...x...' },
+      bassLight: [[0, 20, 0, 0.9]],
+      bassFull: [[0, 12, 0, 1], [12, 8, 0, 0.9]],
+    }, 1],
+  ],
+  // seven as two, two and three: the kick on each group, the snare into the long one
+  '7/8': [
+    [{
+      name: 'seven wash',
+      light: { lo: 'x.x.x.x.x.x.x.', kick: 'x.......x.....' },
+      full: { kick: 'x...x...x.....', snare: '........x.....', crash: 'x.o.x.o.x.o.o.' },
+      fill: { snare: '........x.xxxx', crash: 'x.o.x.o.......' },
+      layer: { lo: 'x...x...x.....' },
+      bassLight: [[0, 14, 0, 0.9]],
+      bassFull: [[0, 8, 0, 1], [8, 6, 0, 0.9]],
+    }, 2],
+    [{
+      name: 'seven drive',
+      light: { lo: 'x...x...x.....', ride: 'o.o.o.o.o.o.o.' },
+      full: { kick: 'x...x...x...x.', snare: '....x.......x.', ride: 'x.x.x.x.x.x.x.', crash: 'x.............' },
+      fill: { snare: '....x...x.x.xx', lo: '........xx....' },
+      layer: { crash: 'x.......x.....' },
+      bassLight: [[0, 14, 0, 0.9]],
+      bassFull: [[0, 8, 0, 1], [8, 6, 0, 0.9]],
+    }, 1],
+  ],
   '6/8': [
     [{
       name: 'six wash',
@@ -1126,6 +1159,41 @@ export const CATHEDRAL_TIMES: Banks = {
       layer: { shaker: '-oo.-oo.-oo.' },
       bassLight: [[0, 12, 0, 0.9]],
       bassFull: [[0, 8, 0, 1], [8, 4, 0, 0.9]],
+    }, 1],
+  ],
+  // five as three and two, the taiko leaning on the four: the war march of film scores
+  '5/4': [
+    [{
+      name: 'march in five',
+      light: { lo: 'x...........x.......', mid: '....o...o.......o...' },
+      full: {
+        kick: 'x...........x.......',
+        snare: '........x.......x...',
+        hat: 'o.-.o.-.o.-.o.-.o.-.',
+        lo: 'x...x...x...x...x...',
+        mid: '....o...o.......o...',
+      },
+      fill: { mid: '........o...oo..o...', hi: '................xxxx' },
+      layer: { shaker: '-oo.-oo.-oo.-oo.-oo.' },
+      bassLight: [[0, 20, 0, 0.9]],
+      bassFull: [[0, 12, 0, 1], [12, 8, 0, 0.9]],
+    }, 1],
+  ],
+  '7/8': [
+    [{
+      name: 'seven taiko',
+      light: { lo: 'x.......x.....', mid: '....o.......o.' },
+      full: {
+        kick: 'x.......x.....',
+        snare: '....x.......x.',
+        hat: 'o.-.o.-.o.-.-.',
+        lo: 'x...x...x.....',
+        mid: '....o.......o.',
+      },
+      fill: { mid: '....o...o.oo..', hi: '..........xxxx' },
+      layer: { shaker: '-oo.-oo.-oo.o.' },
+      bassLight: [[0, 14, 0, 0.9]],
+      bassFull: [[0, 8, 0, 1], [8, 6, 0, 0.9]],
     }, 1],
   ],
   '6/8': [

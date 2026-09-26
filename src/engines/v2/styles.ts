@@ -291,7 +291,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Cathedral',
     genre: 'cinematic',
     bpm: [68, 82],
-    meters: [['4/4', 5], ['3/4', 2], ['6/8', 2]],
+    meters: [['4/4', 5], ['3/4', 2], ['6/8', 2], ['5/4', 0.6], ['7/8', 0.3]],
     swing: [0, 0],
     modes: [['aeolian', 3], ['harmonic', 2], ['dorian', 1]],
     forms: [
@@ -414,7 +414,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Nocturne',
     genre: 'piano',
     bpm: [60, 78],
-    meters: [['4/4', 5], ['3/4', 3], ['6/8', 2]],
+    meters: [['4/4', 5], ['3/4', 3], ['6/8', 2], ['5/4', 0.5]],
     swing: [0, 0],
     modes: [['aeolian', 3], ['ionian', 2], ['dorian', 2], ['lydian', 1]],
     forms: [
@@ -456,7 +456,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     genre: 'post-rock',
     bpm: [96, 124],
     // rarely a waltz: in three, a steady pulse under a major key is a carousel
-    meters: [['4/4', 7], ['6/8', 2], ['3/4', 0.5]],
+    meters: [['4/4', 7], ['6/8', 2], ['3/4', 0.5], ['7/8', 0.6], ['5/4', 0.4]],
     swing: [0, 0],
     modes: [['aeolian', 4], ['ionian', 2], ['dorian', 2], ['lydian', 1]],
     // waves, as the references build them: a quiet theme, a long crescendo, a climax held for a long time, a sudden

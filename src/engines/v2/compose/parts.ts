@@ -4,7 +4,20 @@
 import { bounces } from '../moods.ts';
 import { MAJOR_MODES, mod, voiceLead } from '../theory.ts';
 import type { Rng } from '../rng.ts';
-import type { AcidNote, BassKind, HatKind, KickKind, Note, PadKind, SnareKind, StringKind, TomKind } from '../types.ts';
+import {
+  type AcidNote,
+  type BassKind,
+  BEATS,
+  type HatKind,
+  type KickKind,
+  type Meter,
+  type Note,
+  type PadKind,
+  type SnareKind,
+  type StringKind,
+  STRONGS,
+  type TomKind,
+} from '../types.ts';
 import { type ChordSlot, type Ctx, PAD_HI, PAD_LO, sectionChords } from './context.ts';
 
 const VEL: Record<string, number> = { x: 1, o: 0.72, '-': 0.42 };
@@ -114,7 +127,7 @@ export function roll(
 export function runRoll(ctx: Ctx, v0: number, v1: number, k: SnareKind = 'roll'): void {
   const T = ctx.runBars;
   // hits a bar at each stage, in the movement's time: its beats, then eighths, then 16ths
-  const [a, b, c] = ctx.mv.meter === '4/4' ? [4, 8, 16] : ctx.mv.meter === '3/4' ? [3, 6, 12] : [2, 6, 12];
+  const [a, b, c] = [BEATS[ctx.mv.meter].length, ctx.spb / 2, ctx.spb];
   const plan: [number, number][] = [[T / 2, (T / 2) * a], [T / 4, (T / 4) * b], [T / 4, (T / 4) * c]];
   const hits: number[] = [];
   let start = 0;
@@ -518,15 +531,21 @@ export function tremolo(
 }
 
 /**
- * A bar of strumming in the movement's time: down, a lighter up on the "and", down again (four); down, up, down on
- * the beats (a waltz); down on each dotted beat with an up between (6/8).
+ * Strums of a bar in each time, [16th, gain, up]: down, a lighter up on the "and", down again (four); down, up, down
+ * on the beats (a waltz); down on each dotted beat with an up between (6/8); the three, an up, then the two (5/4);
+ * down on each group of 7/8's two, two and three, an up in the long one.
  */
+const STRUMS: Record<Meter, readonly (readonly [number, number, boolean])[]> = {
+  '4/4': [[0, 1, false], [6, 0.7, true], [10, 0.85, false]],
+  '3/4': [[0, 1, false], [4, 0.75, true], [8, 0.8, false]],
+  '6/8': [[0, 1, false], [4, 0.6, true], [6, 0.85, false], [10, 0.6, true]],
+  '5/4': [[0, 1, false], [6, 0.7, true], [12, 0.9, false], [16, 0.7, false]],
+  '7/8': [[0, 1, false], [4, 0.75, false], [8, 0.85, false], [11, 0.6, true]],
+};
+
+/** A bar of strumming in the movement's time (see STRUMS). */
 export function strumBar(ctx: Ctx, bar: number, ns: readonly number[], k: StringKind, v: number): void {
-  const plan: [number, number, boolean][] = ctx.mv.meter === '4/4'
-    ? [[0, 1, false], [6, 0.7, true], [10, 0.85, false]]
-    : ctx.mv.meter === '3/4'
-    ? [[0, 1, false], [4, 0.75, true], [8, 0.8, false]]
-    : [[0, 1, false], [4, 0.6, true], [6, 0.85, false], [10, 0.6, true]];
+  const plan = STRUMS[ctx.mv.meter];
   // a still piece strums once a bar, a flowing one only down
   const played = plan.filter(([s, , up]) =>
     ctx.mv.motion === 'driving' || (ctx.mv.motion === 'flowing' ? !up : s === 0)
@@ -584,10 +603,18 @@ export function pianoBar(ctx: Ctx, bar: number, fig: PianoFigure, v: number): vo
   const chord = (s: number, d: number, vv: number, notes = [up[0], up[1], up[2]]) =>
     ctx.push({ i: 'piano', t: t(s), d: d * ctx.s16, n: notes, v: v * vv });
   const eighths = Array.from({ length: ctx.spb / 2 }, (_, k) => 2 * k);
-  const six = ctx.mv.meter === '6/8';
+  const meter = ctx.mv.meter;
+  const six = meter === '6/8';
+  const broken: Record<Meter, readonly number[]> = {
+    '4/4': [0, 2, 1, 3, 4, 3, 1, 2],
+    '3/4': [0, 2, 4, 3, 2, 1],
+    '6/8': [0, 2, 4, 3, 4, 2],
+    '5/4': [0, 2, 4, 3, 4, 2, 0, 2, 4, 2],
+    '7/8': [0, 2, 1, 3, 0, 2, 4],
+  };
   switch (fig) {
     case 'broken':
-      figure(eighths, ctx.spb === 16 ? [0, 2, 1, 3, 4, 3, 1, 2] : six ? [0, 2, 4, 3, 4, 2] : [0, 2, 4, 3, 2, 1], 3);
+      figure(eighths, broken[meter], 3);
       break;
     case 'alberti':
       figure(eighths, [0, 2, 1, 2], 2);
@@ -596,9 +623,14 @@ export function pianoBar(ctx: Ctx, bar: number, fig: PianoFigure, v: number): vo
       figure([...Array(ctx.spb).keys()], six ? [0, 1, 2, 3, 2, 1] : [0, 1, 2, 3, 4, 3, 2, 1], 2);
       break;
     case 'block':
-      if (ctx.spb === 16) {
+      if (meter === '4/4') {
         chord(0, 7.5, 0.9);
         chord(8, 7.5, 0.75);
+      } else if (meter === '5/4' || meter === '7/8') {
+        // on the groups: five's three and two, seven's two and two, then three
+        const [a, b] = STRONGS[meter];
+        chord(a, b - a - 0.5, 0.9);
+        chord(b, ctx.spb - b - 0.5, 0.75);
       } else if (six) {
         chord(0, 5.5, 0.9);
         chord(6, 5.5, 0.75);

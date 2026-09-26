@@ -6,7 +6,7 @@ const DELAY = Number(new URL(import.meta.url).searchParams.get('delay') ?? 100);
 self.onmessage = (ev: MessageEvent<RenderRequest>) => {
   const req = ev.data;
   if (req.kind !== 'section') return;
-  const song = engine(req.version).song(req.phrase, req.styles, req.length);
+  const song = engine(req.version).song(req.phrase, req.styles, req.length, req.character);
   const seconds = song.section(req.index).duration + 5;
   const until = Date.now() + DELAY;
   while (Date.now() < until) { /* busy, like a real render */ }

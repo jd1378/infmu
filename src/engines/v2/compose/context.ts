@@ -17,7 +17,16 @@ import {
   tonicNear,
   voiceLead,
 } from '../theory.ts';
-import { type ChordSpan, type Ev, type Movement, type Role, type SectionDef, stepsPerBar } from '../types.ts';
+import {
+  BEATS,
+  type ChordSpan,
+  type Ev,
+  type Movement,
+  type Role,
+  type SectionDef,
+  stepsPerBar,
+  STRONGS,
+} from '../types.ts';
 
 export interface ChordSlot {
   bar: number; // first bar (inside the section) this chord sounds on
@@ -197,17 +206,16 @@ export class Ctx {
    */
   /** The strong beats of a bar, in 16ths: one and three in four, both dotted beats in 6/8, a waltz's downbeat. */
   get strongs(): number[] {
-    return this.mv.meter === '4/4' ? [0, 8] : this.mv.meter === '6/8' ? [0, 6] : [0];
+    return [...STRONGS[this.mv.meter]];
   }
 
   /** Whether a 16th falls on a beat: every quarter in 4/4 and 3/4, each dotted quarter in 6/8. */
   onBeat(step: number): boolean {
-    return mod(step, this.mv.meter === '6/8' ? 6 : 4) === 0;
+    return BEATS[this.mv.meter].includes(mod(step, this.spb));
   }
 
   strong(step: number): boolean {
-    const s = mod(step, this.spb);
-    return this.mv.meter === '4/4' ? s % 8 === 0 : this.mv.meter === '6/8' ? s % 6 === 0 : s === 0;
+    return STRONGS[this.mv.meter].includes(mod(step, this.spb));
   }
 
   chordAt(bar: number): ChordSlot {

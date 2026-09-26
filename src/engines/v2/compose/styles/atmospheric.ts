@@ -363,7 +363,7 @@ export function ember(ctx: Ctx): void {
   };
   const interlock = (b: number, v: number) => {
     const top = drone(ctx.chordAt(b)).slice(-3);
-    pickNotes(ctx, b, 'clean', top, droneFigure, ctx.mv.meter === '4/4' ? 6 : 4, v, 0.45);
+    pickNotes(ctx, b, 'clean', top, droneFigure, ctx.mv.meter === '3/4' || ctx.mv.meter === '6/8' ? 4 : 6, v, 0.45);
   };
   // the wall: power chords held through each chord, a guitarist each side
   const wall = (v: number, from = 0, to = bars) => {
@@ -393,7 +393,7 @@ export function ember(ctx: Ctx): void {
   // on the root throughout, moving with the chords: a bass that bounces to the fifth and the octave is a polka, or a
   // carousel in three
   const onBeats: BassHit[] = [...Array(ctx.spb).keys()].filter((s) => ctx.onBeat(s))
-    .map((s) => [s, ctx.mv.meter === '6/8' ? 6 : 4, 0, ctx.strong(s) ? 1 : 0.8]);
+    .map((s, i, all) => [s, (all[i + 1] ?? ctx.spb) - s, 0, ctx.strong(s) ? 1 : 0.8]);
   const eighths: BassHit[] = EIGHTHS.filter(([s]) => s < ctx.spb);
   const bassline = (hits: readonly BassHit[], k: BassKind, v: (b: number) => number, from = 0, to = bars) => {
     for (let b = from; b < to; b++) bassFigure(ctx, b, hits, k, v(b));

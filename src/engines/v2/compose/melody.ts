@@ -67,6 +67,32 @@ const LYRICAL_6: Cell[] = [
   [[0, 2], [2, 4], [6, 6]],
   [[0, 6], [6, 2], [8, 2], [10, 2]],
 ];
+// five beats grouped three and two (5/4), and seven eighths grouped two, two and three (7/8): the long group last
+const SPARSE_5: Cell[] = [[[0, 20]], [[0, 12], [12, 8]], [[0, 8], [8, 12]]];
+const LYRICAL_5: Cell[] = [
+  [[0, 6], [6, 2], [8, 4], [12, 8]], // the three, then the two held
+  [[0, 4], [4, 4], [8, 4], [12, 4], [16, 4]],
+  [[0, 4], [4, 8], [12, 8]],
+  [[0, 12], [12, 4], [16, 4]],
+  [[0, 2], [2, 2], [4, 8], [12, 4], [16, 4]],
+  [[0, 4], [4, 2], [6, 6], [12, 8]],
+];
+const SPARSE_7: Cell[] = [[[0, 14]], [[0, 8], [8, 6]], [[0, 4], [4, 10]]];
+const LYRICAL_7: Cell[] = [
+  [[0, 4], [4, 4], [8, 6]], // two, two, three
+  [[0, 2], [2, 2], [4, 4], [8, 6]],
+  [[0, 4], [4, 2], [6, 2], [8, 6]],
+  [[0, 4], [4, 4], [8, 2], [10, 4]],
+  [[0, 8], [8, 2], [10, 4]],
+];
+/** A style's cells in each time but four: [sparse, lyrical]. */
+const CELLS: Record<Exclude<Meter, '4/4'>, readonly [Cell[], Cell[]]> = {
+  '3/4': [SPARSE_3, LYRICAL_3],
+  '6/8': [SPARSE_6, LYRICAL_6],
+  '5/4': [SPARSE_5, LYRICAL_5],
+  '7/8': [SPARSE_7, LYRICAL_7],
+};
+
 /** Second bars (short mid-phrase, long at a cadence) for each bar length and time. */
 const TAILS: Record<Meter, { short: Cell[]; long: Cell[] }> = {
   '4/4': { short: TAIL_SHORT, long: TAIL_LONG },
@@ -77,6 +103,14 @@ const TAILS: Record<Meter, { short: Cell[]; long: Cell[] }> = {
   '6/8': {
     short: [[[0, 4], [4, 2], [6, 6]], [[0, 6], [6, 6]]],
     long: [[[0, 12]], [[0, 6], [6, 6]], [[0, 4], [4, 8]]],
+  },
+  '5/4': {
+    short: [[[0, 4], [4, 8], [12, 8]], [[0, 6], [6, 6], [12, 8]], [[0, 2], [2, 2], [4, 8], [12, 8]]],
+    long: [[[0, 20]], [[0, 12], [12, 8]], [[0, 4], [4, 16]]],
+  },
+  '7/8': {
+    short: [[[0, 4], [4, 4], [8, 6]], [[0, 8], [8, 6]]],
+    long: [[[0, 14]], [[0, 4], [4, 10]], [[0, 8], [8, 6]]],
   },
 };
 
@@ -277,13 +311,13 @@ export function tuned(p: Profile, tune: Tune): Profile {
 }
 
 /**
- * A style's idiom in three: the same share of long, sparse notes against lyrical ones, in the time's own cells.
+ * A style's idiom in another time: the same share of long, sparse notes against lyrical ones, in the time's own cells.
  * A riff keeps four (trance and acid stay in four).
  */
 export function inMeter(p: Profile, meter: Meter): Profile {
   if (meter === '4/4' || p.riff) return p;
   const sparse = p.head.some((c) => SPARSE.includes(c));
-  const [sp, ly] = meter === '3/4' ? [SPARSE_3, LYRICAL_3] : [SPARSE_6, LYRICAL_6];
+  const [sp, ly] = CELLS[meter];
   return { ...p, head: sparse ? [...sp, ...ly] : ly, meter };
 }
 

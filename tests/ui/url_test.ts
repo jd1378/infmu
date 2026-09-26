@@ -29,3 +29,11 @@ Deno.test('malformed or hostile hashes are ignored, not trusted', () => {
   assertEquals(readHash('#seed=a&v=3'), { seed: 'a', version: 3 });
   assertEquals(readHash('#seed=---&t=Infinity'), {});
 });
+
+Deno.test('a steady song keeps its character in the link; the adventurous default is left out', () => {
+  const hash = hashFor({ seed: 'a', version: 2, character: 'steady', length: 'long' });
+  assertEquals(hash, '#seed=a&v=2&len=long&char=steady');
+  assertEquals(readHash(hash), { seed: 'a', version: 2, length: 'long', character: 'steady' });
+  assertEquals(hashFor({ seed: 'a', version: 2, character: 'adventurous' }), '#seed=a&v=2');
+  assertEquals(readHash('#seed=a&char=Steady!'), { seed: 'a' });
+});

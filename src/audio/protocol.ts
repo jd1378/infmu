@@ -1,11 +1,12 @@
-// Messages to and from the render worker. `version` picks the composer engine; phrase, styles and length
-// identify the song within it.
+// Messages to and from the render worker. `version` picks the composer engine; phrase, styles, length and
+// character identify the song within it.
 
 interface SongRef {
   version: number;
   phrase: string;
   styles: string[];
   length: string;
+  character: string;
 }
 
 export type RenderRequest =

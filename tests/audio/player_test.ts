@@ -167,6 +167,7 @@ Deno.test({
       phrase: 'a',
       styles: ['drift'],
       length: 'standard',
+      character: 'adventurous',
       index: 0,
       sampleRate: 100,
     };

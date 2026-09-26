@@ -22,7 +22,15 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const stylesOf = (s: SongPlan) => s.styles.length < engine(s.version).styles.length ? [...s.styles] : undefined;
 
 const placeOf = (s: SongPlan, movement?: number, time?: number) =>
-  hashFor({ seed: s.phrase, version: s.version, length: s.length, styles: stylesOf(s), movement, time });
+  hashFor({
+    seed: s.phrase,
+    version: s.version,
+    length: s.length,
+    character: s.character,
+    styles: stylesOf(s),
+    movement,
+    time,
+  });
 
 export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -33,6 +41,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     initial.seed ?? randomSeedPhrase(),
     initial.styles,
     initial.length,
+    initial.character,
   );
   const player = makePlayer(song);
   const start = initial.movement !== undefined
@@ -144,7 +153,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     buildSegments(mv);
     el.end.textContent = clock(mv.duration);
     if (!foreignLink) history.replaceState(null, '', placeOf(song, mv.index));
-    rememberSeed(song.phrase, song.version, song.length);
+    rememberSeed(song.phrase, song.version, song.length, song.character);
     // the dial snapshot becomes the cover art once a few frames have been drawn in the new key
     setTimeout(() => {
       const art = (document.getElementById('dial') as HTMLCanvasElement).toDataURL('image/png');
@@ -400,9 +409,10 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     styles: readonly string[] | undefined,
     play: boolean,
     length?: string,
+    character?: string,
   ): void {
     const wasPlaying = player.state === 'playing' || player.state === 'loading';
-    song = engine(version).song(phrase, styles, length);
+    song = engine(version).song(phrase, styles, length, character);
     shownMovement = null;
     shownIndex = -1;
     player.load(song, 0, 0);
@@ -420,6 +430,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
       same ? stylesOf(song) : undefined,
       true,
       same ? song.length : undefined,
+      same ? song.character : undefined,
     );
   };
   $('new-seed').addEventListener('click', newSeed);
@@ -440,9 +451,9 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     const version = p.version ?? LEGACY_VERSION;
     if (!p.seed) return;
     if (!isVersion(version)) return toast(`That link needs composer v${version}, which this page doesn't have`);
-    const next = engine(version).song(p.seed, p.styles, p.length);
+    const next = engine(version).song(p.seed, p.styles, p.length, p.character);
     const same = next.phrase === song.phrase && next.version === song.version && next.length === song.length &&
-      next.styles.join() === song.styles.join();
+      next.character === song.character && next.styles.join() === song.styles.join();
     if (!same) {
       song = next;
       shownMovement = null;
@@ -472,16 +483,19 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
   const chosen = new Set<string>();
   let chosenVersion = song.version;
   let chosenLength = song.length;
+  let chosenCharacter = song.character;
 
   function fillSeedDialog(): void {
     $<HTMLInputElement>('seed-input').value = displaySeed(song.phrase);
     chosenVersion = song.version;
     chosenLength = song.length;
+    chosenCharacter = song.character;
     chosen.clear();
     for (const st of song.styles) chosen.add(st);
     renderVersions();
     renderStyles();
     renderLengths();
+    renderCharacters();
     const recent = recentSeeds().filter((r) =>
       isVersion(r.version) && (r.seed !== song.phrase || r.version !== song.version)
     );
@@ -491,7 +505,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
       const b = chip(displaySeed(r.seed) + (r.version === LATEST_VERSION ? '' : ` (v${r.version})`));
       b.addEventListener('click', () => {
         $<HTMLDialogElement>('seeds').close();
-        loadSong(r.seed, r.version, undefined, true, r.length);
+        loadSong(r.seed, r.version, undefined, true, r.length, r.character);
       });
       li.append(b);
       return li;
@@ -518,9 +532,11 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
         chosen.clear();
         for (const st of e.styles) chosen.add(st.id);
         chosenLength = 'standard';
+        chosenCharacter = 'adventurous';
         renderVersions();
         renderStyles();
         renderLengths();
+        renderCharacters();
       });
       return b;
     }));
@@ -534,6 +550,20 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
       b.addEventListener('click', () => {
         chosenLength = l.id;
         renderLengths();
+      });
+      return b;
+    }));
+  }
+
+  function renderCharacters(): void {
+    const characters = engine(chosenVersion).characters ?? [];
+    $('character-h').hidden = !characters.length;
+    $('character-p').hidden = !characters.length;
+    $('characters').replaceChildren(...characters.map((c) => {
+      const b = chip(c.label, c.id === chosenCharacter);
+      b.addEventListener('click', () => {
+        chosenCharacter = c.id;
+        renderCharacters();
       });
       return b;
     }));
@@ -568,6 +598,7 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
       chosen.size < all.length ? all.map((st) => st.id).filter((id) => chosen.has(id)) : undefined,
       true,
       chosenLength,
+      chosenCharacter,
     );
   });
 
