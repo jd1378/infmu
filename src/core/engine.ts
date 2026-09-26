@@ -78,6 +78,8 @@ export interface SectionScore {
   /** Seconds rendered past `duration` for reverb and echo tails. */
   tail: number;
   bpm: number;
+  /** Seconds from the section start of each bar line, the end included, when the tempo moves (else 240 / bpm apart). */
+  bars?: readonly number[];
   movement: MovementInfo;
   section: SectionInfo;
   /** The key this section plays in: the movement's, or another after a key change. */

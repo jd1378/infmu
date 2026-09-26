@@ -6,11 +6,11 @@
 // sounds sloppy); short notes are detached and long ones joined; chords are rolled a little differently every
 // time. Only what a person would play is performed: arpeggiators, the 303 and the sequenced leads of dance
 // music keep a machine's grid, and the kick and the bass keep time (groove research finds wobble there only
-// hurts; a bassist's touch shows in dynamics). Everything is drawn from the section's own stream, so a seed
-// still plays the same performance.
+// hurts; a bassist's touch shows in dynamics). A style played by a band has a drummer too (see drummer()).
+// Everything is drawn from the seed's own streams, so a seed still plays the same performance.
 
 import type { Rng } from '../rng.ts';
-import { type Ev, isMelody, type Note } from '../types.ts';
+import { type Ev, isMelody, type Note, type StyleId, TAKES } from '../types.ts';
 import type { Ctx } from './context.ts';
 
 /** How a part is played: how far its player drifts (s), their jitter (s), how much their dynamics move. */
@@ -75,6 +75,11 @@ function player(ctx: Ctx, rng: Rng, { drift, jitter, loud: moves, melody }: Touc
 }
 
 export function perform(ctx: Ctx): void {
+  players(ctx);
+  drummer(ctx);
+}
+
+function players(ctx: Ctx): void {
   const parts = new Map<string, { how: Touch; events: Ev[] }>();
   for (const e of ctx.events) {
     const part = `${e.i}:${'k' in e ? e.k : ''}:${isMelody(e) ? 'melody' : ''}`;
@@ -112,5 +117,81 @@ export function perform(ctx: Ctx): void {
       // a chord is rolled a little differently every time
       if (e.i === 'piano') e.strum = (e.strum ?? 0.01) * ctx.rng.fork('roll', name, index).range(0.6, 1.6);
     });
+  }
+}
+
+// ------------------------------------------------------------------ the drummer
+
+type Limb = 'kick' | 'snare' | 'hat' | 'perc' | 'tom';
+type Hit = Extract<Ev, { i: 'kick' | 'snare' | 'hat' | 'perc' | 'tom' }>;
+
+/**
+ * Where each limb of a style's drummer sits against the beat, in seconds (+ late). A feel is systematic, not
+ * random: drummers asked to play laid back or pushed place their strokes consistently a few ms off the beat
+ * (Danielsen et al., "Effects of instructed timing and tempo on snare drum sound in drum kit performance",
+ * 2015). The styles without an entry are played by a drum machine: the same sample, exactly where it was
+ * programmed.
+ */
+const FEEL: Partial<Record<StyleId, Record<Limb, number>>> = {
+  // a lazy rim, a shaker a hair ahead
+  drift: { kick: 0, snare: 0.008, hat: -0.002, perc: 0.004, tom: 0.004 },
+  // the lean of a sampled break: kicks early, hats and snares behind (the grooves' own lag adds to it)
+  haze: { kick: -0.004, snare: 0.004, hat: 0.006, perc: 0.006, tom: 0 },
+  // the shaker drives, the hand drums sit back
+  garden: { kick: 0, snare: 0.006, hat: -0.003, perc: 0.005, tom: 0 },
+  // heavy sticks speak late
+  cathedral: { kick: 0, snare: 0.003, hat: 0, perc: 0.002, tom: 0.006 },
+  nocturne: { kick: 0, snare: 0.004, hat: 0, perc: 0.004, tom: 0.004 },
+  // a rock drummer pushes on the cymbals and leans back on a fat backbeat
+  ember: { kick: 0, snare: 0.006, hat: -0.004, perc: -0.003, tom: 0.002 },
+};
+
+/** How far each limb's dynamics reach: a stroke's level against the loudest of its part is raised to this. */
+const REACH: Record<Limb, number> = { kick: 1, snare: 1.6, hat: 1.3, perc: 1.3, tom: 1.2 };
+
+const limbOf = (e: Hit): Limb => e.i === 'perc' ? (e.k === 'ride' || e.k === 'crash' ? 'hat' : 'perc') : e.i;
+
+/**
+ * A drummer plays the written kit: ghost notes fall well under the backbeat (a machine plays the grid's three
+ * levels; a player's reach is wider) and are never twice the same; every limb sits where the style's feel puts
+ * it and wanders a little around there, slowly, as players do; the last bar of each phrase swells into the
+ * next; and every stroke is one of the drum's takes, never the same take twice in a row.
+ */
+function drummer(ctx: Ctx): void {
+  const feel = FEEL[ctx.mv.style];
+  if (!feel) return;
+  // one drummer across the movement: their drift runs on through the sections
+  const from = ctx.mv.sections.slice(0, ctx.local).reduce((n, s) => n + s.bars, 0) * ctx.bar;
+  const parts = new Map<string, Hit[]>();
+  for (const e of ctx.events) {
+    if (e.i !== 'kick' && e.i !== 'snare' && e.i !== 'hat' && e.i !== 'perc' && e.i !== 'tom') continue;
+    const part = `${e.i}:${'k' in e ? e.k : ''}`;
+    const known = parts.get(part);
+    if (known) known.push(e);
+    else parts.set(part, [e]);
+  }
+  for (const [name, hits] of parts) {
+    hits.sort((a, b) => a.t - b.t);
+    const limb = limbOf(hits[0]);
+    const rng = ctx.rng.fork('drummer', name);
+    const time = wander(ctx.mrng.fork('drummer', limb, 'time'));
+    const loud = wander(ctx.mrng.fork('drummer', limb, 'loud'));
+    const top = Math.max(...hits.map((e) => e.v));
+    let take = rng.int(TAKES);
+    for (const e of hits) {
+      const rel = e.v / top;
+      let v = top * rel ** REACH[limb];
+      // ghost notes vary most
+      v *= 1 + 0.05 * loud(from + e.t) + rng.jitter(0.04 + 0.12 * (1 - rel));
+      // the last bar of a phrase swells into the next: more at the end of eight bars than of four
+      const bar = Math.floor((e.t + 0.01) / ctx.bar);
+      const rb = ctx.runBar(bar);
+      const into = (e.t / ctx.bar - bar - 0.5) * 2;
+      if (rb % 4 === 3 && into > 0) v *= 1 + (rb % 8 === 7 ? 0.25 : 0.12) * into;
+      e.v = Math.max(0.02, v);
+      e.t = Math.max(0, e.t + feel[limb] + 0.003 * time(from + e.t) + (limb === 'kick' ? rng.jitter(0.0015) : 0));
+      e.take = take;
+      take = (take + 1 + rng.int(TAKES - 1)) % TAKES;
+    }
   }
 }

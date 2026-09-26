@@ -38,6 +38,12 @@ export interface StyleDef {
   delayWet: Range;
   crackle: Range;
   wow: Range;
+  /**
+   * How a band's tempo breathes (see tempo.ts); all 0 for a sequencer's clock, which never moves. `rubato`: how
+   * far a phrase presses on and relaxes in the calm parts (half that elsewhere); `push`: how much faster the
+   * peak runs; `rit`: how far the tempo falls by the last beat of a piece that ends by stopping or fading.
+   */
+  tempo: { rubato: number; push: number; rit: number };
 }
 
 export const ROLE_ENERGY: Record<Role, number> = {
@@ -81,6 +87,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.5, 0.7],
     crackle: [0, 0],
     wow: [0, 0.4],
+    tempo: { rubato: 0.04, push: 0, rit: 0.3 },
   },
   haze: {
     id: 'haze',
@@ -108,6 +115,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.25, 0.4],
     crackle: [0.5, 1],
     wow: [0.6, 1],
+    tempo: { rubato: 0, push: 0, rit: 0 },
   },
   pulse: {
     id: 'pulse',
@@ -135,6 +143,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.4, 0.55],
     crackle: [0, 0],
     wow: [0, 0.2],
+    tempo: { rubato: 0, push: 0, rit: 0 },
   },
   rise: {
     id: 'rise',
@@ -162,6 +171,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.45, 0.6],
     crackle: [0, 0],
     wow: [0, 0],
+    tempo: { rubato: 0, push: 0, rit: 0 },
   },
   cathedral: {
     id: 'cathedral',
@@ -189,6 +199,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.2, 0.35],
     crackle: [0, 0],
     wow: [0, 0],
+    tempo: { rubato: 0.05, push: 0.015, rit: 0.4 },
   },
   acid: {
     id: 'acid',
@@ -216,6 +227,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.3, 0.45],
     crackle: [0, 0],
     wow: [0, 0],
+    tempo: { rubato: 0, push: 0, rit: 0 },
   },
   garden: {
     id: 'garden',
@@ -243,6 +255,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.25, 0.4],
     crackle: [0, 0],
     wow: [0, 0.2],
+    tempo: { rubato: 0, push: 0.012, rit: 0.25 },
   },
   nocturne: {
     id: 'nocturne',
@@ -270,6 +283,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.08, 0.15],
     crackle: [0, 0],
     wow: [0, 0],
+    tempo: { rubato: 0.08, push: 0.01, rit: 0.4 },
   },
   ember: {
     id: 'ember',
@@ -297,6 +311,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.45, 0.65],
     crackle: [0, 0],
     wow: [0, 0],
+    tempo: { rubato: 0, push: 0.025, rit: 0.3 },
   },
 };
 

@@ -1,5 +1,27 @@
-import type { Tone } from '../types.ts';
+import { hash32, hashString, Rng } from '../rng.ts';
+import { TAKES, type Tone } from '../types.ts';
 import { Noise, pan, TAU } from './dsp.ts';
+
+/**
+ * How one stroke of a drum differs from its reference sound: pitch, decay and brightness factors. A machine
+ * plays the reference every time; a player's strokes land a little differently each time, and softer ones
+ * are darker.
+ */
+export interface Stroke {
+  tune: number;
+  decay: number;
+  bright: number;
+}
+
+const REFERENCE: Stroke = { tune: 1, decay: 1, bright: 1 };
+/** Velocities a played drum is rendered at: a hit uses the nearest and is scaled the rest of the way. */
+const LAYERS = [0.3, 0.6, 1];
+
+/** Take `take` of a drum at velocity layer `layer`: drawn once per sound, so a take always sounds the same. */
+function stroke(key: string, layer: number, take: number): Stroke {
+  const r = new Rng(hash32(hashString(key), take));
+  return { tune: 1 + r.jitter(0.01), decay: 1 + r.jitter(0.08), bright: layer ** 0.35 * (1 + r.jitter(0.06)) };
+}
 
 /**
  * The mix buses of one section render: main (L/R, not pumped), music (ML/MR, pumped by the kick's
@@ -24,7 +46,7 @@ export class Bus {
   /** Concert pitch: the frequency of A4 every note is tuned from. */
   readonly a4: number;
   private readonly wowCurve: Float32Array | null;
-  /** Rendered drum hits by kind: a drum machine plays the same sample every time, and so can we. */
+  /** Rendered drum hits by sound, velocity layer and take. */
   private readonly protos = new Map<string, Float32Array>();
 
   constructor(sr: number, seconds: number, noiseSeed: number, tone: Tone, a4 = 440) {
@@ -67,26 +89,34 @@ export class Bus {
   }
 
   /**
-   * Like voice(), but renders the sound once per `key` and replays it scaled by `gain`. Only for sounds that
-   * are linear in their velocity.
+   * A drum hit. A machine's (no `take`) is rendered once per `key` and replayed scaled by its velocity: the
+   * same sample every time. A player's is one of a few takes of the stroke, rendered at the velocity layer
+   * nearest the hit (see Stroke). Only for sounds that are linear in their velocity.
    */
   hit(
     key: string,
-    t: number,
+    e: { t: number; v: number; take?: number },
     sec: number,
-    make: () => (j: number, u: number) => number,
-    gain: number,
+    make: (s: Stroke) => (j: number, u: number) => number,
     p = 0,
     rv = 0,
     dl = 0,
     duck = 0,
   ): void {
+    let s = REFERENCE;
+    if (e.take !== undefined) {
+      const near = (a: number, b: number) => Math.abs(Math.log(b / e.v)) < Math.abs(Math.log(a / e.v)) ? b : a;
+      const layer = LAYERS.reduce(near);
+      const take = e.take % TAKES;
+      s = stroke(key, layer, take);
+      key = `${key}:${layer}:${take}`;
+    }
     let proto = this.protos.get(key);
     if (!proto) {
-      proto = this.mono(Math.round(sec * this.sr), make());
+      proto = this.mono(Math.round(sec * s.decay * this.sr), make(s));
       this.protos.set(key, proto);
     }
-    this.place(proto, t, gain, p, rv, dl, duck);
+    this.place(proto, e.t, e.v, p, rv, dl, duck);
   }
 
   private mono(len: number, fn: (j: number, u: number) => number): Float32Array {

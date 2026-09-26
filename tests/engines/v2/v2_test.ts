@@ -1,12 +1,15 @@
-import { assert, assertEquals, assertNotEquals } from '@std/assert';
+import { assert, assertAlmostEquals, assertEquals, assertNotEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v2/compose/index.ts';
 import { Ctx, sectionKey } from '../../../src/engines/v2/compose/context.ts';
 import { Song } from '../../../src/engines/v2/plan.ts';
-import { STYLE_IDS } from '../../../src/engines/v2/styles.ts';
+import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
+import { Bus } from '../../../src/engines/v2/synth/bus.ts';
 import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
+import { snare } from '../../../src/engines/v2/synth/instruments.ts';
 import { melodyOffset, renderScore } from '../../../src/engines/v2/synth/render.ts';
+import { Clock, tempoAt } from '../../../src/engines/v2/tempo.ts';
 import { MODES, pc } from '../../../src/engines/v2/theory.ts';
-import { type Ev, isMelody } from '../../../src/engines/v2/types.ts';
+import { type Ev, isMelody, type StyleId, TAKES } from '../../../src/engines/v2/types.ts';
 
 Deno.test('movements run as long as the listener chose', () => {
   const bounds = { short: [95, 175], standard: [165, 265], long: [265, 400] } as const;
@@ -347,4 +350,126 @@ Deno.test('played parts are performed; the kick, the synth bass and the arpeggia
     s.events.filter((e) => ['string', 'piano', 'mallet'].includes(e.i)).map((e) => (e as { v: number }).v.toFixed(3)),
   );
   assert(velocities.size > 20, `only ${velocities.size} different velocities in the played parts`);
+});
+
+type Hit = Extract<Ev, { i: 'kick' | 'snare' | 'hat' | 'perc' | 'tom' }>;
+const isHit = (e: Ev): e is Hit => ['kick', 'snare', 'hat', 'perc', 'tom'].includes(e.i);
+/** Every section of the first movement of a one-style song. */
+const sectionsOf = (seed: string, style: StyleId) => {
+  const song = new Song(seed, [style]);
+  const mv = song.movement(0);
+  return mv.sections.map((_, k) => composeSection(song, mv.firstSection + k));
+};
+
+Deno.test("a drummer's strokes are never the same take twice in a row; a drum machine's are all one sample", () => {
+  for (const style of ['ember', 'haze'] as const) {
+    for (const s of sectionsOf(`takes-${style}`, style)) {
+      const last = new Map<string, number>();
+      for (const e of s.events.filter(isHit)) {
+        assert(e.take !== undefined && e.take >= 0 && e.take < TAKES, `${style} ${e.i} without a take`);
+        const part = `${e.i}:${'k' in e ? e.k : ''}`;
+        assertNotEquals(last.get(part), e.take, `${style} ${part} repeats a take at ${e.t.toFixed(2)} s`);
+        last.set(part, e.take);
+      }
+    }
+  }
+  for (const s of sectionsOf('takes-rise', 'rise')) assert(s.events.filter(isHit).every((e) => e.take === undefined));
+});
+
+Deno.test('takes of a stroke differ, a take is the same every time, and a softer stroke is darker', () => {
+  const tone = new Song('strokes', ['ember']).movement(0).tone;
+  const one = (e: Omit<Extract<Ev, { i: 'snare' }>, 'i'>) => {
+    const b = new Bus(16000, 0.5, 1, tone);
+    snare(b, { i: 'snare', ...e });
+    return b.L;
+  };
+  const hit = { t: 0, v: 1, k: 'big' as const };
+  assertEquals(one(hit), one(hit), 'a machine plays one sample');
+  assertEquals(one({ ...hit, take: 2 }), one({ ...hit, take: 2 }), 'a take is fixed');
+  assertNotEquals(one({ ...hit, take: 1 }), one({ ...hit, take: 2 }));
+  // brightness: the share of the signal's power in its sample-to-sample differences
+  const bright = (x: Float32Array) => {
+    let d = 0;
+    let p = 0;
+    for (let i = 1; i < x.length; i++) {
+      d += (x[i] - x[i - 1]) ** 2;
+      p += x[i] ** 2;
+    }
+    return d / p;
+  };
+  const soft = bright(one({ ...hit, v: 0.3, take: 0 }));
+  const hard = bright(one({ ...hit, v: 1, take: 0 }));
+  assert(soft < hard * 0.8, `a ghost note is as bright as a backbeat (${soft.toFixed(3)} vs ${hard.toFixed(3)})`);
+});
+
+Deno.test('a drummer plays ghost notes well under the backbeat, and each limb where the feel puts it', () => {
+  const song = new Song('feel-ember', ['ember']);
+  const mv = song.movement(0);
+  const sections = mv.sections.map((_, k) => composeSection(song, mv.firstSection + k));
+  const snares = sections.flatMap((s) => s.events.filter((e) => e.i === 'snare').map((e) => e.v)).sort((a, b) => a - b);
+  const ghost = snares[Math.floor(snares.length * 0.1)] / snares[Math.floor(snares.length * 0.9)];
+  assert(ghost < 0.3, `ghost notes are ${ghost.toFixed(2)} of the backbeat`);
+  // a rock drummer pushes on the cymbals and leans back on the backbeat
+  // against the written grid: the band's tempo moves the grid itself
+  const s16 = 60 / mv.bpm / 4;
+  const offsets = (f: (e: Ev) => boolean) =>
+    sections.flatMap((s) => {
+      const clock = new Clock(mv, s.local);
+      return s.events.filter(f).map((e) => clock.written(e.t)).map((t) => t - Math.round(t / s16) * s16);
+    });
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const kick = mean(offsets((e) => e.i === 'kick'));
+  const hats = mean(offsets((e) => e.i === 'hat'));
+  const backbeat = mean(offsets((e) => e.i === 'snare'));
+  assert(hats < kick - 0.002, `hats ${((hats - kick) * 1000).toFixed(1)} ms from the kick`);
+  assert(backbeat > kick + 0.003, `backbeat ${((backbeat - kick) * 1000).toFixed(1)} ms from the kick`);
+});
+
+Deno.test("a sequencer's tempo never moves", () => {
+  for (const style of STYLE_IDS.filter((x) => !Object.values(STYLES[x].tempo).some(Boolean))) {
+    const mv = new Song(`steady-${style}`, [style]).movement(0);
+    mv.sections.forEach((sec, k) => {
+      assert(new Clock(mv, k).steady, `${style} ${sec.role} moves`);
+      assertEquals(sec.seconds, sec.bars * (240 / mv.bpm));
+    });
+  }
+});
+
+Deno.test('a band pushes into its peak and slows into the end of a piece', () => {
+  let ended = 0;
+  for (let m = 0; m < 12; m++) {
+    const mv = new Song('breathing', ['ember']).movement(m);
+    const tempo = (k: number) => tempoAt(mv, k, mv.sections[k].bars / 2);
+    const verse = mv.sections.findIndex((x) => x.role === 'verse');
+    const peak = mv.sections.findIndex((x) => x.energy === 1);
+    assert(tempo(peak) > tempo(verse) * 1.015, `movement ${m}: the peak runs no faster than a verse`);
+    if (mv.transition !== 'pause' && mv.transition !== 'fade') continue;
+    ended++;
+    const last = mv.sections.findLastIndex((x) => x.role !== 'rest');
+    const end = tempoAt(mv, last, mv.sections[last].bars);
+    assert(end < 0.75, `movement ${m} ends at ${(end * 100).toFixed(0)}% of its tempo`);
+    // the ritardando is gradual: half-way through its last bar it's only part of the way down
+    assert(tempoAt(mv, last, mv.sections[last].bars - 0.5) > end + 0.05);
+  }
+  assert(ended > 3, `only ${ended} endings`);
+});
+
+Deno.test("every part follows the section's clock", () => {
+  const song = new Song('clock', ['nocturne']);
+  const mv = song.movement(0);
+  const k = mv.sections.findLastIndex((x) => x.role !== 'rest');
+  const s = composeSection(song, mv.firstSection + k);
+  const clock = new Clock(mv, k);
+  assert(!clock.steady && s.duration > s.section.bars * (240 / mv.bpm), 'the last bars are not drawn out');
+  assertEquals(s.duration, mv.sections[k].seconds);
+  for (const t of [0.3, 5, 17.2, s.duration + 2]) assertAlmostEquals(clock.written(clock.at(t)), t, 1e-9);
+  assert(Math.abs(s.bars[s.bars.length - 1] - s.duration) < 1e-9);
+  // bar lines spread out as the piece slows
+  const lengths = s.bars.slice(1).map((x, i) => x - s.bars[i]);
+  assert(lengths[lengths.length - 1] > lengths[0] * 1.2);
+  // a chord change still lands on its bar line
+  for (const c of s.chords) assert(s.bars.some((x) => Math.abs(x - c.t) < 1e-9), `a chord at ${c.t.toFixed(3)} s`);
+  // and the movement's length is the sum of its sections' played lengths
+  const sum = mv.sections.reduce((n, x) => n + x.seconds, 0);
+  assert(Math.abs(sum - mv.duration) < 1e-9);
 });

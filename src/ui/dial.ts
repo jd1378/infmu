@@ -216,8 +216,7 @@ export class Dial {
 
     // the bar hand: one sweep per bar, a quiet metronome
     if (playing || pos.offset > 0) {
-      const bar = (4 * 60) / score.bpm;
-      const frac = (pos.offset % bar) / bar;
+      const frac = barFraction(score, pos.offset);
       const [hx, hy] = at(frac * TAU - this.rot, R * 1.02);
       g.strokeStyle = this.col(0.9, 0.03, 0.12);
       g.lineWidth = 1;
@@ -321,4 +320,16 @@ export class Dial {
     }
     g.globalCompositeOperation = 'source-over';
   }
+}
+
+/** How far through its bar `offset` (seconds into the section) is, 0 to 1. */
+export function barFraction(score: Pick<SectionScore, 'bpm' | 'bars'>, offset: number): number {
+  const lines = score.bars;
+  if (!lines || lines.length < 2) {
+    const bar = (4 * 60) / score.bpm;
+    return (offset % bar) / bar;
+  }
+  let k = 0;
+  while (k < lines.length - 2 && offset >= lines[k + 1]) k++;
+  return Math.min(1, Math.max(0, (offset - lines[k]) / (lines[k + 1] - lines[k])));
 }

@@ -31,27 +31,27 @@ const KICK: Record<KickKind, readonly number[]> = {
 export function kick(b: Bus, e: E<'kick'>): void {
   const [f0, tau, dec, drive, g0, ck, sw, kn, pu, lpf] = KICK[e.k];
   const sr = b.sr;
-  const f1 = b.hz(e.n);
   b.hit(
     `kick:${e.k}:${e.n}`,
-    e.t,
+    e,
     0.7,
-    () => {
+    (s) => {
+      const f1 = b.hz(e.n) * s.tune;
       const g = g0 / tanh(drive);
       const bp = new SVF(sr, 4000, 0.8);
-      const lp = new SVF(sr, lpf, 0.6);
+      const lp = new SVF(sr, lpf * s.bright, 0.6);
       const knock = new SVF(sr, 520, 0.5);
+      const d = dec / s.decay;
       let ph = 0;
       return (_j, u) => {
-        ph += (f1 + (f0 - f1) * exp(-u / tau) + 350 * exp(-u / 0.0025)) / sr;
+        ph += (f1 + (f0 * s.tune - f1) * exp(-u / tau) + 350 * exp(-u / 0.0025)) / sr;
         bp.run(b.noise.next());
-        const x = tanh(drive * sin(TAU * ph) * exp(-dec * u) * (1 + 1.5 * exp(-40 * u)));
+        const x = tanh(drive * sin(TAU * ph) * exp(-d * u) * (1 + 1.5 * exp(-40 * u)));
         knock.run(x);
         const y = sw * x + kn * knock.bp + pu * sin(TAU * 2 * f1 * u) * exp(-u / 0.035) * min(1, u / 0.002);
-        return lp.run(tanh(1.4 * y)) * g + bp.bp * ck * 0.28 * exp(-u / 0.004) * smooth(u / 0.0005);
+        return lp.run(tanh(1.4 * y)) * g + bp.bp * ck * s.bright * 0.28 * exp(-u / 0.004) * smooth(u / 0.0005);
       };
     },
-    e.v,
     0,
     e.k === 'soft' ? 0 : 0.04,
   );
@@ -64,11 +64,11 @@ function clap(b: Bus, e: E<'snare'>): void {
   const v = round(e.v * 20) / 20; // soft clipping makes the clap non-linear in velocity: one sample per level
   b.hit(
     `clap:${v}`,
-    e.t,
+    { t: e.t, v: 1, take: e.take },
     0.5,
-    () => {
-      const f = new SVF(b.sr, 1350, 1.1);
-      const top = new SVF(b.sr, 7500);
+    (s) => {
+      const f = new SVF(b.sr, 1350 * s.tune, 1.1);
+      const top = new SVF(b.sr, 7500 * s.bright);
       return (_j, u) => {
         f.run(
           top.run(b.noise.next()) *
@@ -77,7 +77,6 @@ function clap(b: Bus, e: E<'snare'>): void {
         return tanh(f.bp * v * 2.4);
       };
     },
-    1,
     0.02,
     v < 0.8 ? 0.25 : 0.32,
   );
@@ -87,20 +86,19 @@ function clap(b: Bus, e: E<'snare'>): void {
 function gated(b: Bus, e: E<'snare'>): void {
   b.hit(
     'gated',
-    e.t,
+    e,
     0.42,
-    () => {
+    (s) => {
       const hp = new SVF(b.sr, 900, 0.6);
-      const top = new SVF(b.sr, 7000);
+      const top = new SVF(b.sr, 7000 * s.bright);
       let p1 = 0;
       return (_j, u) => {
-        p1 += (190 * (1 + 0.25 * exp(-40 * u))) / b.sr;
+        p1 += (190 * s.tune * (1 + 0.25 * exp(-40 * u))) / b.sr;
         hp.run(top.run(b.noise.next()));
         const gate = u < 0.24 ? 1 - (0.35 * u) / 0.24 : exp(-70 * (u - 0.24));
         return (sin(TAU * p1) * 0.6 * exp(-22 * u) + 0.9 * hp.hp * gate * smooth(u / 0.002)) * 0.72;
       };
     },
-    e.v,
     0,
     0.18,
   );
@@ -109,16 +107,16 @@ function gated(b: Bus, e: E<'snare'>): void {
 function rim(b: Bus, e: E<'snare'>): void {
   b.hit(
     'rim',
-    e.t,
+    e,
     0.08,
-    () => {
-      const bp = new SVF(b.sr, 1800, 2);
+    (s) => {
+      const bp = new SVF(b.sr, 1800 * s.bright, 2);
+      const d = 90 / s.decay;
       return (_j, u) => {
         bp.run(b.noise.next());
-        return (bp.bp * 1.2 + 0.6 * sin(TAU * 820 * u)) * exp(-90 * u) * 0.5;
+        return (bp.bp * 1.2 + 0.6 * sin(TAU * 820 * s.tune * u)) * exp(-d * u) * 0.5;
       };
     },
-    e.v,
     0.15,
     0.1,
   );
@@ -132,24 +130,26 @@ export function snare(b: Bus, e: E<'snare'>): void {
   const size = { roll: 0.5, big: 1, huge: 1.7, dusty: 0.8 }[e.k];
   b.hit(
     `snare:${e.k}`,
-    e.t,
+    e,
     0.6 * size,
-    () => {
+    (s) => {
       const hp = new SVF(b.sr, 1000, 0.6);
-      const top = new SVF(b.sr, e.k === 'dusty' ? 3000 : 5000 / sqrt(size));
+      const top = new SVF(b.sr, (e.k === 'dusty' ? 3000 : 5000 / sqrt(size)) * s.bright);
       const g = (size < 1 ? 0.55 : 0.9) * (e.k === 'dusty' ? 1.3 : 1);
+      // a soft stroke barely sets the wires going
+      const wires = 1.5 * s.bright ** 2;
+      const d = 14 / size / s.decay;
       let p1 = 0;
       let p2 = 0;
       return (_j, u) => {
-        const f = 185 * (1 + 0.3 * exp(-45 * u));
+        const f = 185 * s.tune * (1 + 0.3 * exp(-45 * u));
         p1 += f / b.sr;
         p2 += (1.63 * f) / b.sr;
         hp.run(top.run(b.noise.next()));
         return ((sin(TAU * p1) + 0.45 * sin(TAU * p2)) * 0.55 * exp(-26 * u) +
-          1.5 * hp.hp * exp((-14 * u) / size) * smooth(u / 0.01)) * g;
+          wires * hp.hp * exp(-d * u) * smooth(u / 0.01)) * g;
       };
     },
-    e.v,
     0,
     { roll: 0.12, big: 0.42, huge: 0.6, dusty: 0.18 }[e.k],
   );
@@ -159,16 +159,16 @@ export function tom(b: Bus, e: E<'tom'>): void {
   const f = b.hz(e.n);
   b.hit(
     `tom:${e.n}`,
-    e.t,
+    e,
     0.6,
-    () => {
+    (s) => {
+      const d = 7 / s.decay;
       let ph = 0;
       return (_j, u) => {
-        ph += (f * (1 + 0.6 * exp(-18 * u))) / b.sr;
-        return (sin(TAU * ph) * exp(-7 * u) + 0.2 * b.noise.next() * exp(-60 * u)) * 0.42;
+        ph += (f * s.tune * (1 + 0.6 * exp(-18 * u))) / b.sr;
+        return (sin(TAU * ph) * exp(-d * u) + 0.2 * s.bright * b.noise.next() * exp(-60 * u)) * 0.42;
       };
     },
-    e.v,
     max(-0.6, min(0.6, (f - 150) / 90)),
     0.25,
   );
@@ -183,21 +183,21 @@ export function hat(b: Bus, e: E<'hat'>): void {
   const dusty = e.k === 'dusty';
   b.hit(
     `hat:${e.k}`,
-    e.t,
+    e,
     open ? 0.131 : 0.14,
-    () => {
-      const hp = new SVF(b.sr, sh ? 5000 : dusty ? 5500 : 6500, 0.9);
-      const lpf = dusty ? 6500 : 9500;
+    (s) => {
+      const hp = new SVF(b.sr, (sh ? 5000 : dusty ? 5500 : 6500) * s.bright, 0.9);
+      const lpf = (dusty ? 6500 : 9500) * s.bright;
       const lp = [new SVF(b.sr, lpf), new SVF(b.sr, lpf)];
       const ph = METAL.map(() => b.noise.unit());
-      const dec = open ? 13 : sh ? 40 : dusty ? 26 : 32;
+      const dec = (open ? 13 : sh ? 40 : dusty ? 26 : 32) / s.decay;
       const att = sh ? 0.007 : 0.0025;
       const g = sh ? 0.28 : dusty ? 0.28 : 0.32;
       return (_j, u) => {
         let m = 0;
         if (!sh) {
           for (let k = 0; k < 6; k++) {
-            ph[k] = (ph[k] + METAL[k] / b.sr) % 1;
+            ph[k] = (ph[k] + (METAL[k] * s.tune) / b.sr) % 1;
             m += ph[k] < 0.5 ? 0.12 : -0.12;
           }
         }
@@ -205,7 +205,6 @@ export function hat(b: Bus, e: E<'hat'>): void {
         return lp[1].run(lp[0].run(hp.hp)) * exp(-dec * u) * min(1, u / att) * g;
       };
     },
-    e.v,
     e.p ?? (sh ? ((e.t * 8) % 2 < 1 ? -0.35 : 0.35) : open ? -0.2 : 0.22),
     0.08,
   );

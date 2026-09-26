@@ -25,6 +25,8 @@ export interface SectionDef {
   energy: number;
   /** Semitones above the movement's key: the lifted final choruses. */
   shift: number;
+  /** How long the bars last as the band plays them (see tempo.ts): what the section's clock makes of them. */
+  seconds: number;
 }
 
 /** Per-movement timbre variation, so two seeds in the same style still sound like different records. */
@@ -101,12 +103,19 @@ export interface Note {
   v: number;
 }
 
-/** `lead` marks the section's melody, which the mix sets on top of everything else. */
+/** How many takes of each stroke a drummer's kit has (see `take`). */
+export const TAKES = 4;
+
+/**
+ * `lead` marks the section's melody, which the mix sets on top of everything else. `take` marks a drum hit
+ * played by a person: which of the stroke's takes sounds (0 to TAKES - 1). A machine's hits have none and all
+ * sound alike.
+ */
 export type Ev =
-  | { i: 'kick'; t: number; v: number; k: KickKind; sc: number; n: number }
-  | { i: 'snare'; t: number; v: number; k: SnareKind }
-  | { i: 'tom'; t: number; v: number; n: number }
-  | { i: 'hat'; t: number; v: number; k: HatKind; p?: number }
+  | { i: 'kick'; t: number; v: number; k: KickKind; sc: number; n: number; take?: number }
+  | { i: 'snare'; t: number; v: number; k: SnareKind; take?: number }
+  | { i: 'tom'; t: number; v: number; n: number; take?: number }
+  | { i: 'hat'; t: number; v: number; k: HatKind; p?: number; take?: number }
   | { i: 'bass'; t: number; d: number; n: number; v: number; k: BassKind; rel?: number }
   | { i: 'pad'; t: number; d: number; n: number[]; k: PadKind; cut: [number, number]; g?: number; rel?: number }
   | { i: 'keys'; t: number; d: number; n: number[]; v: number }
@@ -128,7 +137,7 @@ export type Ev =
   | { i: 'choir'; t: number; d: number; n: number[]; vowel: Vowel; g?: number }
   | { i: 'wind'; t: number; k: WindKind; ns: Note[]; lead?: boolean }
   | { i: 'acid'; t: number; ns: AcidNote[]; cut: [number, number]; res: number; env: number; square?: boolean }
-  | { i: 'perc'; t: number; v: number; k: PercKind; n?: number; p?: number }
+  | { i: 'perc'; t: number; v: number; k: PercKind; n?: number; p?: number; take?: number }
   /** Silence: every dry part and send stops for d seconds; with `room` false the reverb stops too. */
   | { i: 'gap'; t: number; d: number; room: boolean };
 
@@ -156,6 +165,8 @@ export interface Score {
   /** Audio rendered past `duration` for reverb and echo tails; overlaps the next section. */
   tail: number;
   bpm: number;
+  /** Seconds from the section start of each bar line, the end included: the tempo may move (see tempo.ts). */
+  bars: number[];
   events: Ev[];
   chords: ChordSpan[];
   /** Seeds the synth's noise, so the audio of a section is as reproducible as its notes. */

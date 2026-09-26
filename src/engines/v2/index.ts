@@ -174,6 +174,7 @@ export const v2: Engine = {
       duration: s.duration,
       tail: s.tail,
       bpm: s.bpm,
+      bars: s.bars,
       movement: p.info(s.movement),
       section: s.section,
       key: keyInfo(sectionKey(s.movement, s.local)),

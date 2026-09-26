@@ -479,19 +479,21 @@ export function perc(b: Bus, e: E<'perc'>): void {
       const dec = { conga: 0.22, congaHi: 0.16, bongo: 0.1 }[e.k];
       b.hit(
         `perc:${e.k}:${f0.toFixed(1)}`,
-        e.t,
+        e,
         dec * 6,
-        () => {
+        (s) => {
           let ph = 0;
-          const slap = new SVF(sr, 1800, 1.2);
+          const slap = new SVF(sr, 1800 * s.bright, 1.2);
+          // an open tone from a soft hand, a slap from a hard one
+          const hand = 0.7 * s.bright ** 2;
+          const d = dec * s.decay;
           return (_j, u) => {
-            ph += (f0 * (1 + 0.35 * exp(-u / 0.012))) / sr;
+            ph += (f0 * s.tune * (1 + 0.35 * exp(-u / 0.012))) / sr;
             slap.run(b.noise.next());
-            const body = sin(TAU * ph) * exp(-u / dec) + 0.3 * sin(TAU * ph * 1.52) * exp(-u / (dec * 0.4));
-            return (body + slap.bp * 0.7 * exp(-u / 0.004)) * 0.35;
+            const body = sin(TAU * ph) * exp(-u / d) + 0.3 * sin(TAU * ph * 1.52) * exp(-u / (d * 0.4));
+            return (body + slap.bp * hand * exp(-u / 0.004)) * 0.35;
           };
         },
-        e.v,
         e.p ?? (e.k === 'bongo' ? 0.35 : e.k === 'congaHi' ? 0.15 : -0.25),
         0.15,
       );
@@ -501,20 +503,19 @@ export function perc(b: Bus, e: E<'perc'>): void {
       // the 808's: two square waves a fifth-ish apart through a band-pass, a fast decay then a ring
       b.hit(
         'perc:cowbell',
-        e.t,
+        e,
         0.8,
-        () => {
-          const bp = new SVF(sr, 800, 2.5);
+        (s) => {
+          const bp = new SVF(sr, 800 * s.bright, 2.5);
           let p1 = 0;
           let p2 = 0;
           return (_j, u) => {
-            p1 = (p1 + 540 / sr) % 1;
-            p2 = (p2 + 800 / sr) % 1;
+            p1 = (p1 + (540 * s.tune) / sr) % 1;
+            p2 = (p2 + (800 * s.tune) / sr) % 1;
             bp.run((p1 < 0.5 ? 1 : -1) + (p2 < 0.5 ? 1 : -1));
-            return bp.bp * (0.6 * exp(-u * 25) + 0.4 * exp(-u * 5)) * 0.3;
+            return bp.bp * (0.6 * exp(-u * 25) + 0.4 * exp((-u * 5) / s.decay)) * 0.3;
           };
         },
-        e.v,
         e.p ?? 0.3,
         0.1,
         0.1,
@@ -525,27 +526,28 @@ export function perc(b: Bus, e: E<'perc'>): void {
       const crash = e.k === 'crash';
       b.hit(
         `perc:${e.k}`,
-        e.t,
+        e,
         crash ? 3 : 1.6,
-        () => {
+        (s) => {
           const ph = METAL.map((_, k) => (k * 0.17) % 1);
-          const hp = new SVF(sr, crash ? 3500 : 5500, 0.8);
-          const lp = new SVF(sr, crash ? 14000 : 10000, 0.6);
-          const ping = [new Partial(3150, sr), new Partial(4870, sr)];
+          const hp = new SVF(sr, (crash ? 3500 : 5500) * s.bright, 0.8);
+          const top = (crash ? 14000 : 10000) * s.bright;
+          const lp = new SVF(sr, top, 0.6);
+          const ping = [new Partial(3150 * s.tune, sr), new Partial(4870 * s.tune, sr)];
+          const d = (crash ? 1.4 : 2.6) / s.decay;
           return (j, u) => {
             let m = 0;
             for (let k = 0; k < 6; k++) {
-              ph[k] = (ph[k] + (METAL[k] * (crash ? 3.1 : 2.4)) / sr) % 1;
+              ph[k] = (ph[k] + (METAL[k] * s.tune * (crash ? 3.1 : 2.4)) / sr) % 1;
               m += ph[k] < 0.5 ? 0.15 : -0.15;
             }
-            if (crash && (j & 31) === 0) lp.set(6000 + 8000 * exp(-u * 1.5));
+            if (crash && (j & 31) === 0) lp.set((6000 + 8000 * exp(-u * 1.5)) * s.bright);
             hp.run(m * (crash ? 0.4 : 0.8) + b.noise.next() * (crash ? 0.8 : 0.35));
             const body = lp.run(hp.hp);
             const bell = crash ? 0 : (ping[0].next() + 0.6 * ping[1].next()) * 0.06 * exp(-u * 3);
-            return (body * exp(-u * (crash ? 1.4 : 2.6)) * min(1, u / 0.002) + bell) * (crash ? 0.22 : 0.11);
+            return (body * exp(-u * d) * min(1, u / 0.002) + bell) * (crash ? 0.22 : 0.11);
           };
         },
-        e.v,
         e.p ?? (crash ? -0.4 : 0.45),
         crash ? 0.35 : 0.15,
         0.05,
@@ -555,17 +557,16 @@ export function perc(b: Bus, e: E<'perc'>): void {
     case 'snap':
       b.hit(
         'perc:snap',
-        e.t,
+        e,
         0.2,
-        () => {
-          const bp = new SVF(sr, 2200, 3);
+        (s) => {
+          const bp = new SVF(sr, 2200 * s.tune * s.bright, 3);
           return (_j, u) => {
             bp.run(b.noise.next());
             const env = exp(-u * 120) + 0.7 * (u > 0.006 ? exp(-(u - 0.006) * 90) : 0);
             return bp.bp * env * 1.2;
           };
         },
-        e.v,
         e.p ?? 0.1,
         0.3,
         0.1,

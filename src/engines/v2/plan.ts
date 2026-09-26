@@ -5,6 +5,7 @@
 import { hash32, Rng } from './rng.ts';
 import { movementTitle, normalizeSeed, seedNumber } from './seed.ts';
 import { type ProgChord, PROGRESSIONS, ROLE_ENERGY, STYLE_IDS, type StyleDef, STYLES } from './styles.ts';
+import { Clock } from './tempo.ts';
 import { type ChordSpec, type Key, mod } from './theory.ts';
 import type { Movement, Role, SectionDef, StyleId, Transition } from './types.ts';
 
@@ -112,8 +113,11 @@ export class Song {
     const swing = rng.fork('swing').range(style.swing[0], style.swing[1]);
     const bar = (4 * 60) / bpm;
     const transition = rng.fork('transition').weighted(style.transitions);
-    const sections = planForm(style, rng.fork('form'), bar, transition, this.length);
-    const duration = sections.reduce((s, x) => s + x.bars * bar, 0);
+    const seed = hash32(this.seed, m);
+    const form = planForm(style, rng.fork('form'), bar, transition, this.length);
+    const paced = { style: styleId, bpm, seed, transition, sections: form };
+    const sections = form.map((s, k) => ({ ...s, seconds: new Clock(paced, k).duration }));
+    const duration = sections.reduce((s, x) => s + x.seconds, 0);
 
     const h = rng.fork('harmony');
     const pool = PROGRESSIONS[mode];
@@ -152,7 +156,7 @@ export class Song {
 
     return {
       index: m,
-      seed: hash32(this.seed, m),
+      seed,
       title: movementTitle(rng.fork('title')),
       style: styleId,
       key,
@@ -182,7 +186,13 @@ export const barSeconds = (mv: Movement) => (4 * 60) / mv.bpm;
 export const LENGTHS = { short: [110, 150], standard: [185, 235], long: [290, 360] } as const;
 export type Length = keyof typeof LENGTHS;
 
-function planForm(style: StyleDef, rng: Rng, bar: number, transition: Transition, length: Length): SectionDef[] {
+function planForm(
+  style: StyleDef,
+  rng: Rng,
+  bar: number,
+  transition: Transition,
+  length: Length,
+): Omit<SectionDef, 'seconds'>[] {
   const steps = rng.pick(style.forms).split(' ').map((s) => {
     const [role, bars] = s.replace('?', '').split(':');
     return { role: role as Role, bars: Number(bars), optional: s.endsWith('?') };
@@ -251,7 +261,7 @@ function planForm(style: StyleDef, rng: Rng, bar: number, transition: Transition
   }
 
   const energy = arc(steps);
-  const out: SectionDef[] = steps.map((s, i) => ({
+  const out: Omit<SectionDef, 'seconds'>[] = steps.map((s, i) => ({
     role: s.role,
     bars: s.bars,
     energy: energy[i],
@@ -285,9 +295,9 @@ function arc(steps: readonly { role: Role; bars: number }[]): number[] {
   return raw.map((e) => e / top);
 }
 
-export const sectionDuration = (mv: Movement, local: number) => mv.sections[local].bars * barSeconds(mv);
+export const sectionDuration = (mv: Movement, local: number) => mv.sections[local].seconds;
 export function sectionOffset(mv: Movement, local: number): number {
-  let bars = 0;
-  for (let s = 0; s < local; s++) bars += mv.sections[s].bars;
-  return bars * barSeconds(mv);
+  let seconds = 0;
+  for (let s = 0; s < local; s++) seconds += mv.sections[s].seconds;
+  return seconds;
 }

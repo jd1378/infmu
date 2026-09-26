@@ -23,6 +23,11 @@ files. The same seed plays the same endless song for anyone, so a song is shared
 - **Grooves with a feel.** Each style has a bank of grooves written the way a producer programs them (drums and a bass
   line that locks with the kick, with verse, chorus and fill bars); a movement draws one and keeps it, and two pieces of
   a style in a row never share one.
+- **Played, not sequenced.** What a person would play is performed: a melody swells through its phrase and breathes at
+  its end, each player drifts a little around the beat, chords are rolled. The band styles have a drummer with a feel of
+  their own (a lazy backbeat, cymbals pushing ahead), ghost notes far under the backbeat and a different take of the
+  drum on every stroke, and their tempo breathes: the band pushes into its peak, calm phrases press on and relax, and a
+  piece slows into its last chord. Drum machines and sequencers keep their exact grid.
 - **Pieces that build.** A movement is an arc: it starts quiet, every return is bigger, breaks fall back, and the last
   chorus or drop is the peak. A returning part grows by one thing at a time (a counter-line answering the hook, a layer
   in the groove, the colour joining) and the peak doubles the hook. Loudness follows it over a range each style sets (a
