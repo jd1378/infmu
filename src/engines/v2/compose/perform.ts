@@ -52,9 +52,9 @@ function wander(rng: Rng): (t: number) => number {
 
 type Played = { t: number; v: number; d?: number };
 
-/** One player's reading of their part. */
-function player(ctx: Ctx, rng: Rng, { drift, jitter, loud: moves, melody }: Touch) {
-  const time = wander(rng.fork('time'));
+/** One player's reading of their part; `hands` seeds their sense of time, shared by the parts they play. */
+function player(ctx: Ctx, rng: Rng, hands: Rng, { drift, jitter, loud: moves, melody }: Touch) {
+  const time = wander(hands.fork('time'));
   const loud = wander(rng.fork('loud'));
   const phrase = 4 * ctx.bar;
   return (n: Played, breath: boolean, short: boolean): void => {
@@ -82,6 +82,7 @@ export function perform(ctx: Ctx): void {
   drummer(ctx);
   listen(ctx);
   pedal(ctx);
+  hammers(ctx);
   fretwork(ctx);
 }
 
@@ -97,26 +98,28 @@ function players(ctx: Ctx): void {
     }
   }
   for (const [name, { how, events }] of parts) {
-    const play = player(ctx, ctx.rng.fork('perform', name), how);
+    // a pianist's two hands keep one time: the tune and the accompaniment drift together
+    const hands = ctx.rng.fork('perform', events[0].i === 'piano' ? 'piano' : name);
+    const play = player(ctx, ctx.rng.fork('perform', name), hands, how);
     const onsets = events.flatMap((e) => ('ns' in e ? e.ns.map((n) => n.t) : [e.t])).sort((a, b) => a - b);
-    // a breath: nothing new from this part for a beat or more after the note
-    const breathAfter = (t: number) => {
+    // a breath: a rest of half a beat or more after the note (a note without a length: nothing new for 1.5 beats)
+    const breathAfter = (t: number, d?: number) => {
       const next = onsets.find((x) => x > t + 1e-6);
-      return next === undefined || next - t >= ctx.beat;
+      return next === undefined || (d === undefined ? next - t >= 1.5 * ctx.beat : next - (t + d) >= ctx.beat / 2);
     };
     events.forEach((e, index) => {
       if ('ns' in e) {
         const ns = e.ns as Note[];
         ns.forEach((n, k) => {
           const gap = (ns[k + 1]?.t ?? n.t + n.d) - n.t;
-          play(n, breathAfter(n.t), gap < ctx.beat * 0.75);
+          play(n, breathAfter(n.t, n.d), gap < ctx.beat * 0.75);
         });
         e.t = ns[0].t;
         return;
       }
       const d = 'd' in e ? e.d : undefined;
       const n: Played = { t: e.t, v: 'v' in e ? e.v : 1, d };
-      play(n, breathAfter(e.t), d !== undefined && d < ctx.beat * 0.75);
+      play(n, breathAfter(e.t, d), d !== undefined && d < ctx.beat * 0.75);
       e.t = n.t;
       if ('v' in e) e.v = n.v;
       if ('d' in e && n.d !== undefined) e.d = n.d;
@@ -344,6 +347,21 @@ function pedal(ctx: Ctx): void {
     const next = isMelody(e) ? tune.find((x) => x.t > e.t + 1e-6) : undefined;
     const end = next ? Math.min(held, next.t + 0.03) : held;
     e.d = Math.max(e.d, end - e.t);
+  }
+}
+
+/** Seconds of hammer flight per unit of (1 - velocity)^2, against a key struck at 0.6. */
+const HAMMER = 0.1;
+
+/**
+ * A piano's hammers fly: a key struck hard sounds sooner after the finger than one pressed gently, so a melody
+ * played out over a soft accompaniment sounds a few tens of ms ahead of it, one of the ways a pianist's tune
+ * stands out (Goebl, "Melody lead in piano performance: expressive device or artifact?", 2001). Centred on a
+ * middling touch, so the piano as a whole stays with the band.
+ */
+function hammers(ctx: Ctx): void {
+  for (const e of ctx.events) {
+    if (e.i === 'piano') e.t = Math.max(0, e.t + HAMMER * ((1 - Math.min(1, e.v)) ** 2 - 0.16));
   }
 }
 

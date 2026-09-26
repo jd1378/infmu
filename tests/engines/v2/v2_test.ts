@@ -627,3 +627,35 @@ Deno.test('a slide glides onto its note; a long wind note swells', () => {
   };
   assert(rms(1.9, 2.2) > rms(0.3, 0.6) * 1.12, 'a long note stays flat');
 });
+
+Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and the left hand leans on its bass", () => {
+  const song = new Song('pianist', ['nocturne']);
+  const mv = song.movement(0);
+  const k = mv.sections.findIndex((s) => s.role === 'bridge' || s.role === 'intro');
+  const tempo = Array.from({ length: mv.sections[k].bars * 16 + 1 }, (_, j) => tempoAt(mv, k, j / 16));
+  assert(Math.max(...tempo) / Math.min(...tempo) > 1.15, 'a calm phrase keeps one tempo');
+  const written = mv.sections[k].bars * (240 / mv.bpm);
+  assert(Math.abs(mv.sections[k].seconds / written - 1) < 0.03, 'rubato stole time it never gave back');
+
+  const verse = mv.sections.findIndex((s) => s.role === 'verse');
+  const s = composeSection(song, mv.firstSection + verse);
+  const clock = new Clock(mv, verse);
+  const pianos = s.events.filter((e): e is Extract<Ev, { i: 'piano' }> => e.i === 'piano');
+  const tune = pianos.filter(isMelody);
+  const chords = pianos.filter((e) => !isMelody(e));
+  const leads = tune.flatMap((m) => {
+    const near = chords.filter((c) => Math.abs(c.t - m.t) < 0.06);
+    return near.length ? [m.t - Math.min(...near.map((c) => c.t))] : [];
+  });
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  assert(
+    leads.length > 3 && mean(leads) < -0.01,
+    `the tune leads the chords by ${(-mean(leads) * 1000).toFixed(0)} ms`,
+  );
+  const bar = 240 / mv.bpm;
+  const down = chords.filter((e) => {
+    const w = clock.written(e.t) / bar;
+    return Math.abs(w - Math.round(w)) * bar < 0.06;
+  });
+  assert(mean(down.map((e) => e.v)) > mean(chords.map((e) => e.v)) * 1.15, 'the bass note is played like the rest');
+});

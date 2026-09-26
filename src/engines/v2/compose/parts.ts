@@ -389,27 +389,32 @@ export function pick(
 
 export type PianoFigure = 'broken' | 'alberti' | 'block' | 'rolling';
 
-/** The left hand under a piano melody, one bar: a figure over the chord's root, fifth and tenth. */
+/**
+ * The left hand under a piano melody, one bar: a figure over the chord's root, fifth and tenth. A pianist shapes
+ * it: the bass note on the downbeat carries the harmony and is played fullest, the middle of the bar a little
+ * less, and an arpeggio leans a little into its upper notes and falls back with them.
+ */
 export function pianoBar(ctx: Ctx, bar: number, fig: PianoFigure, v: number): void {
   const slot = ctx.chordAt(bar);
   const root = ctx.root(slot) + 12 > 55 ? ctx.root(slot) : ctx.root(slot) + 12;
   const up = arpNotes(slot, root);
   const t = (s: number) => ctx.barAt(bar, s);
-  const note = (s: number, n: number, d: number, vv = v) =>
-    ctx.push({ i: 'piano', t: t(s), d: d * ctx.s16, n: [n], v: vv });
+  const shaped = (s: number, i: number) =>
+    s === 0 ? 1 : s === 8 && i === 0 ? 0.85 : 0.64 + (0.22 * i) / Math.max(1, up.length - 1);
+  const figure = (steps: readonly number[], idx: readonly number[], d: number) =>
+    steps.forEach((s, k) => {
+      const i = idx[k % idx.length] % up.length;
+      ctx.push({ i: 'piano', t: t(s), d: d * ctx.s16, n: [up[i]], v: v * shaped(s, i) });
+    });
   switch (fig) {
     case 'broken':
-      [0, 2, 4, 6, 8, 10, 12, 14].forEach((s, k) =>
-        note(s, up[[0, 2, 1, 3, 4, 3, 1, 2][k] % up.length], 3, v * (k % 4 ? 0.75 : 1))
-      );
+      figure([0, 2, 4, 6, 8, 10, 12, 14], [0, 2, 1, 3, 4, 3, 1, 2], 3);
       break;
     case 'alberti':
-      [0, 2, 4, 6, 8, 10, 12, 14].forEach((s, k) => note(s, up[[0, 2, 1, 2][k % 4]], 2, v * (k % 2 ? 0.7 : 0.9)));
+      figure([0, 2, 4, 6, 8, 10, 12, 14], [0, 2, 1, 2], 2);
       break;
     case 'rolling':
-      for (let s = 0; s < 16; s++) {
-        note(s, up[[0, 1, 2, 3, 4, 3, 2, 1][s % 8] % up.length], 2, v * (s % 4 ? 0.65 : 0.9));
-      }
+      figure([...Array(16).keys()], [0, 1, 2, 3, 4, 3, 2, 1], 2);
       break;
     case 'block':
       ctx.push({ i: 'piano', t: t(0), d: 7.5 * ctx.s16, n: [up[0], up[1], up[2]], v: v * 0.9 });

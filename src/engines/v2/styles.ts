@@ -268,7 +268,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
       'intro:4 verse:8 verse:8? chorus:8 break:4 verse:8 bridge:8 chorus:8 chorus:8? outro:8',
       'intro:4 verse:8 chorus:8 verse:8 solo:8? chorus:8 bridge:8 chorus:8 outro:8',
     ],
-    dynamics: [-13, 14],
+    dynamics: [-16, 14],
     balance: [-9, -5],
     chordSize: [[3, 2], [4, 2]],
     sus2: 0.15,
@@ -283,7 +283,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     delayWet: [0.08, 0.15],
     crackle: [0, 0],
     wow: [0, 0],
-    tempo: { rubato: 0.08, push: 0.01, rit: 0.4 },
+    tempo: { rubato: 0.16, push: 0.01, rit: 0.4 },
   },
   ember: {
     id: 'ember',

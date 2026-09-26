@@ -15,7 +15,15 @@ export type Paced = Pick<Movement, 'style' | 'bpm' | 'seed' | 'transition'> & {
 };
 
 const CALM: ReadonlySet<Role> = new Set(['intro', 'outro', 'break', 'bridge']);
-const PHRASE = 4;
+/**
+ * Rubato works on phrases inside phrases: each 4-bar phrase has its arch, and so does each 8-bar one (a little
+ * shallower), so a player slows most where a long phrase ends. [bars, share of the style's depth].
+ */
+const PHRASES = [[4, 1], [8, 0.6]] as const;
+/** Where a phrase's arch turns: past its middle, so a player presses on for longer than they relax. */
+const TURN = 0.6;
+/** A phrase's arch, 0 at its ends and 1 at its turn; its mean over the phrase is 2/3. */
+const arch = (x: number) => 1 - ((x - TURN) / (x < TURN ? TURN : 1 - TURN)) ** 2;
 /** Bars the band takes to push into a bigger part, or to settle after one; and to slow into the end. */
 const RAMP = 2;
 
@@ -37,12 +45,14 @@ export function tempoAt(mv: Paced, local: number, b: number): number {
   if (next !== null && next > m && b > sec.bars - ramp) m += (next - m) * ((b - (sec.bars - ramp)) / ramp);
 
   if (rubato) {
-    // a new phrase starts back at tempo: the arch is per phrase, each a little different
-    const p = Math.min(Math.floor(b / PHRASE), Math.ceil(sec.bars / PHRASE) - 1);
-    const x = Math.min(1, (b - p * PHRASE) / Math.min(PHRASE, sec.bars - p * PHRASE));
-    const depth = rubato * (CALM.has(sec.role) ? 1 : 0.5) *
-      new Rng(hash32(mv.seed, local, p, 0x72756261)).range(0.6, 1.4);
-    m *= 1 + depth * (Math.sin(Math.PI * x) - 2 / Math.PI);
+    // a phrase starts and ends slower than it runs in its middle; no two phrases are shaped alike
+    for (const [bars, share] of PHRASES) {
+      const p = Math.min(Math.floor(b / bars), Math.ceil(sec.bars / bars) - 1);
+      const x = Math.min(1, (b - p * bars) / Math.min(bars, sec.bars - p * bars));
+      const depth = rubato * share * (CALM.has(sec.role) ? 1 : 0.5) *
+        new Rng(hash32(mv.seed, local, p, bars, 0x72756261)).range(0.6, 1.4);
+      m *= 1 + depth * (arch(x) - 2 / 3);
+    }
   }
 
   let last = secs.length - 1;
