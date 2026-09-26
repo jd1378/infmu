@@ -16,7 +16,7 @@ import {
   tonicNear,
   voiceLead,
 } from '../theory.ts';
-import type { ChordSpan, Ev, Movement, Role, SectionDef } from '../types.ts';
+import { type ChordSpan, type Ev, type Movement, type Role, type SectionDef, stepsPerBar } from '../types.ts';
 
 export interface ChordSlot {
   bar: number; // first bar (inside the section) this chord sounds on
@@ -63,6 +63,8 @@ export class Ctx {
   readonly beat: number;
   readonly bar: number;
   readonly s16: number;
+  /** 16ths in a bar: 16 in four, 12 in three (3/4 and 6/8). */
+  readonly spb: number;
   readonly bars: number;
   readonly duration: number;
   readonly rng: Rng;
@@ -115,6 +117,7 @@ export class Ctx {
     this.beat = 60 / this.mv.bpm;
     this.bar = barSeconds(this.mv);
     this.s16 = this.beat / 4;
+    this.spb = stepsPerBar(this.mv.meter);
     this.bars = this.sec.bars;
     this.duration = this.bars * this.bar;
     this.rng = new Rng(hash32(this.mv.seed, this.local, 0x736563));
@@ -180,7 +183,26 @@ export class Ctx {
   }
 
   barAt(bar: number, step = 0): number {
-    return this.at(bar * 16 + step);
+    return this.at(bar * this.spb + step);
+  }
+
+  /**
+   * Whether a 16th (counted from a bar line) falls on a strong beat of the movement's time: one and three in four,
+   * the downbeat in a waltz, both dotted beats in 6/8.
+   */
+  /** The strong beats of a bar, in 16ths: one and three in four, both dotted beats in 6/8, a waltz's downbeat. */
+  get strongs(): number[] {
+    return this.mv.meter === '4/4' ? [0, 8] : this.mv.meter === '6/8' ? [0, 6] : [0];
+  }
+
+  /** Whether a 16th falls on a beat: every quarter in 4/4 and 3/4, each dotted quarter in 6/8. */
+  onBeat(step: number): boolean {
+    return mod(step, this.mv.meter === '6/8' ? 6 : 4) === 0;
+  }
+
+  strong(step: number): boolean {
+    const s = mod(step, this.spb);
+    return this.mv.meter === '4/4' ? s % 8 === 0 : this.mv.meter === '6/8' ? s % 6 === 0 : s === 0;
   }
 
   chordAt(bar: number): ChordSlot {
@@ -191,7 +213,7 @@ export class Ctx {
 
   /** The chord sounding at a 16th step (section-relative). */
   chordAtStep(step: number): ChordSlot {
-    return this.chordAt(Math.floor(step / 16));
+    return this.chordAt(Math.floor(step / this.spb));
   }
 
   /** Bass-register root of a chord. */
@@ -316,11 +338,10 @@ function turnaround(mv: Movement, local: number, key: Key, before: number): Chor
   return options.length ? rng.pick(options) : null;
 }
 
-/** The chord plan of one section: which progression its role uses, at the style's harmonic rhythm. */
+/** The chord plan of one section: which progression its role uses, at the movement's harmonic rhythm. */
 export function sectionChords(mv: Movement, local: number): ChordSlot[] {
   const sec = mv.sections[local];
-  const style = STYLES[mv.style];
-  const per = style.barsPerChord;
+  const per = mv.barsPerChord;
   const prog = progression(mv, sec.role);
   const key = sectionKey(mv, local);
   const leading = sec.role === 'build' || sec.role === 'prechorus';

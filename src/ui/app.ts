@@ -132,7 +132,8 @@ export function startApp(makePlayer: (song: SongPlan) => PlayerPort): void {
     el.title.querySelector('.num')!.textContent = `${roman(mv.index + 1)}.`;
     el.title.querySelector('.name')!.textContent = mv.title;
     el.style.textContent = styleLabel(mv.style);
-    el.tempo.textContent = `${mv.bpm} BPM${mv.swing > 0.05 ? ', swung' : ''}`;
+    const time = mv.meter && mv.meter !== '4/4' ? `${mv.meter}, ` : '';
+    el.tempo.textContent = `${time}${mv.bpm} BPM${mv.swing > 0.05 ? ', swung' : ''}`;
     const nx = song.movement(mv.index + 1);
     el.next.replaceChildren('Up next: ');
     const b = document.createElement('b');

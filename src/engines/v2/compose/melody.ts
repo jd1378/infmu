@@ -6,8 +6,8 @@
 // few repeated notes, one peak, continuation by step), not on sung ones.
 
 import { hash32, Rng } from '../rng.ts';
-import { mod, pc } from '../theory.ts';
-import type { Note, StyleId } from '../types.ts';
+import { type Key, mod, pc } from '../theory.ts';
+import { type Meter, type Note, stepsPerBar, type StyleId } from '../types.ts';
 import type { ChordSlot, Ctx } from './context.ts';
 
 // ------------------------------------------------------------------ vocabulary
@@ -45,6 +45,41 @@ const RIFF: Cell[] = [
 const TAIL_SHORT: Cell[] = [[[0, 4], [4, 4], [8, 8]], [[0, 6], [6, 2], [8, 8]], [[0, 2], [2, 2], [4, 4], [8, 8]]];
 const TAIL_LONG: Cell[] = [[[0, 4], [4, 12]], [[0, 16]], [[0, 2], [2, 2], [4, 12]], [[0, 6], [6, 10]]];
 
+// the same ideas in three: a waltz's bar of three quarters, and 6/8's two groups of three eighths
+const SPARSE_3: Cell[] = [[[0, 12]], [[0, 8], [8, 4]], [[0, 4], [4, 8]], [[0, 6], [6, 6]]];
+const LYRICAL_3: Cell[] = [
+  [[0, 4], [4, 4], [8, 4]],
+  [[0, 6], [6, 2], [8, 4]], // dotted quarter, eighth, quarter
+  [[0, 4], [4, 2], [6, 2], [8, 4]],
+  [[0, 2], [2, 2], [4, 8]],
+  [[0, 8], [8, 2], [10, 2]],
+  [[0, 3], [3, 1], [4, 8]], // a snap onto the second beat
+  [[0, 4], [4, 6], [10, 2]],
+  [[0, 2], [2, 2], [4, 2], [6, 2], [8, 4]],
+];
+const SPARSE_6: Cell[] = [[[0, 12]], [[0, 6], [6, 6]], [[0, 9], [9, 3]]];
+const LYRICAL_6: Cell[] = [
+  [[0, 4], [4, 2], [6, 6]], // the lilt: quarter, eighth, dotted quarter
+  [[0, 2], [2, 2], [4, 2], [6, 6]],
+  [[0, 6], [6, 4], [10, 2]],
+  [[0, 4], [4, 2], [6, 4], [10, 2]], // rocking
+  [[0, 3], [3, 1], [4, 2], [6, 6]], // a siciliano's dotted eighth
+  [[0, 2], [2, 4], [6, 6]],
+  [[0, 6], [6, 2], [8, 2], [10, 2]],
+];
+/** Second bars (short mid-phrase, long at a cadence) for each bar length and time. */
+const TAILS: Record<Meter, { short: Cell[]; long: Cell[] }> = {
+  '4/4': { short: TAIL_SHORT, long: TAIL_LONG },
+  '3/4': {
+    short: [[[0, 4], [4, 8]], [[0, 6], [6, 6]], [[0, 2], [2, 2], [4, 8]]],
+    long: [[[0, 12]], [[0, 4], [4, 8]], [[0, 2], [2, 2], [4, 8]]],
+  },
+  '6/8': {
+    short: [[[0, 4], [4, 2], [6, 6]], [[0, 6], [6, 6]]],
+    long: [[[0, 12]], [[0, 6], [6, 6]], [[0, 4], [4, 8]]],
+  },
+};
+
 /** How a style writes melody: its idiom. */
 export interface Profile {
   head: readonly Cell[];
@@ -61,6 +96,12 @@ export interface Profile {
   /** 0 triad tones only, 1 also 9ths (and a sus chord's 2nd and 4th), 2 also 11ths on minor, 13ths on major. */
   tensions: 0 | 1 | 2;
   shapes: readonly (readonly [Shape, number])[];
+  /** 16ths after the bar line the motif's first note enters: a tune that comes in just after the downbeat. */
+  offset?: number;
+  /** The time its cells are written in (4/4 unless inMeter() moved it). */
+  meter?: Meter;
+  /** Scale degrees (mod 7) the line steps past: a pentatonic flavour (see RealizeOpts.avoid). */
+  avoid?: readonly number[];
 }
 
 const LYRIC_SHAPES = [['arch', 4], ['leap', 2], ['wave', 1]] as const;
@@ -149,8 +190,52 @@ export const PROFILES: Record<StyleId, Profile> = {
   },
 };
 
-/** A busier line in a style's own idiom: solos. */
-export const busier = (p: Profile): Profile => ({ ...p, head: [...LYRICAL.slice(7), ...RIFF], climb: [5, 7] });
+/** Degrees a pentatonic line steps past: the 4th and 7th of a major mode, the 2nd and 6th of a minor one. */
+const PENTATONIC: Record<Key['mode'], readonly number[]> = {
+  ionian: [3, 6],
+  lydian: [3, 6],
+  mixolydian: [3, 6],
+  aeolian: [1, 5],
+  dorian: [1, 5],
+  phrygian: [1, 5],
+  harmonic: [1, 5],
+};
+
+/**
+ * A movement's own melodic character inside its style's idiom, so two pieces of a style don't sing alike: its
+ * rhythm drawn from the sparser or the busier of the style's cells (or all of them), a climb a little lower or
+ * higher, a line that moves by step or one that leaps, more or fewer repeated notes, a tune that enters on the
+ * downbeat or just after it, and now and then a pentatonic one. A riff (trance, acid) keeps its idiom's rhythm.
+ */
+export function character(rng: Rng, p: Profile, mode: Key['mode']): Profile {
+  const count = (c: Cell) => c.length;
+  const sorted = [...p.head].sort((a, b) => count(a) - count(b));
+  const half = Math.ceil(sorted.length / 2);
+  const density = p.riff ? 'all' : rng.weighted([['sparse', 1], ['all', 2], ['busy', 1]] as const);
+  const head = density === 'sparse' ? sorted.slice(0, half) : density === 'busy' ? sorted.slice(-half) : p.head;
+  const reach = rng.pick([-1, 0, 0, 1, 2]);
+  const steppy = rng.chance(0.3);
+  return {
+    ...p,
+    head,
+    climb: [Math.max(2, p.climb[0] + reach), Math.max(3, p.climb[1] + reach)],
+    leaps: steppy ? p.leaps.filter((l) => l <= 3).concat(2).slice(0, 2) : p.leaps,
+    repeat: Math.min(0.3, p.repeat * rng.pick([0.5, 1, 1, 2.5])),
+    offset: p.riff ? 0 : rng.weighted([[0, 5], [2, 2], [4, 2]] as const),
+    avoid: rng.chance(0.25) ? PENTATONIC[mode] : undefined,
+  };
+}
+
+/**
+ * A style's idiom in three: the same share of long, sparse notes against lyrical ones, in the time's own cells.
+ * A riff keeps four (trance and acid stay in four).
+ */
+export function inMeter(p: Profile, meter: Meter): Profile {
+  if (meter === '4/4' || p.riff) return p;
+  const sparse = p.head.some((c) => SPARSE.includes(c));
+  const [sp, ly] = meter === '3/4' ? [SPARSE_3, LYRICAL_3] : [SPARSE_6, LYRICAL_6];
+  return { ...p, head: sparse ? [...sp, ...ly] : ly, meter };
+}
 
 /** Counter-lines and textures (a glockenspiel line, a hum): sparse and gentle. */
 export const TEXTURE: Profile = {
@@ -178,7 +263,21 @@ export interface Motif {
   profile: Profile;
 }
 
-const cellNotes = (c: Cell, bar: number) => c.map(([on, len]) => ({ on: bar * 16 + on, len, rest: false }));
+/** 16ths in a bar of a profile's time. */
+const barOf = (p: Profile) => stepsPerBar(p.meter ?? '4/4');
+
+const cellNotes = (c: Cell, bar: number, spb: number) =>
+  c.map(([on, len]) => ({ on: bar * spb + on, len, rest: false }));
+
+/**
+ * A two-bar rhythm whose first note enters `by` 16ths late (after the downbeat); the rest keep their places. A first
+ * note too short to give up the time makes way for the next.
+ */
+function shift(rhythm: Motif['rhythm'], by: number): Motif['rhythm'] {
+  if (!by) return rhythm;
+  const [first, ...rest] = rhythm;
+  return first.len > by ? [{ ...first, on: first.on + by, len: first.len - by }, ...rest] : rest;
+}
 
 /**
  * A path of k intervals from `a` to `b`, never above `ceil` (the motif's peak): a scalar run, spare notes spent
@@ -218,11 +317,13 @@ function fill(rng: Rng, a: number, b: number, k: number, repeat: number, ceil = 
  * peak: drawn again from the same seed, it's the climax of the same motif.
  */
 export function makeMotif(rng: Rng, p: Profile, tail: 'short' | 'long' = 'short', lift = 0): Motif {
+  const spb = barOf(p);
   const head = rng.pick(p.head);
+  const tails = TAILS[p.meter ?? '4/4'];
   const bar2 = p.riff
     ? [...head.filter(([on]) => on < 8), [8, 8] as const]
-    : rng.fork('tail').pick(tail === 'short' ? TAIL_SHORT : TAIL_LONG);
-  const rhythm = [...cellNotes(head, 0), ...cellNotes(bar2, 1)];
+    : rng.fork('tail').pick(tail === 'short' ? tails.short : tails.long);
+  const rhythm = shift([...cellNotes(head, 0, spb), ...cellNotes(bar2, 1, spb)], p.offset ?? 0);
   const n = rhythm.length;
   const shape = rng.weighted(p.shapes);
   const leap = rng.pick(p.leaps);
@@ -232,7 +333,7 @@ export function makeMotif(rng: Rng, p: Profile, tail: 'short' | 'long' = 'short'
   if (shape !== 'leap') {
     let best = Infinity;
     rhythm.forEach((r, i) => {
-      const dist = Math.abs(r.on / 32 - px) - (r.len >= 4 ? 0.06 : 0);
+      const dist = Math.abs(r.on / (2 * spb) - px) - (r.len >= 4 ? 0.06 : 0);
       if (i > 0 && i < n - 1 && dist < best) [best, peak] = [dist, i];
     });
   }
@@ -246,7 +347,7 @@ export function makeMotif(rng: Rng, p: Profile, tail: 'short' | 'long' = 'short'
   );
   const endV = shape === 'fall' ? -rng.pick([1, 2, 3]) : Math.min(h - 1, endPick);
   const anchors = new Map<number, number>([[0, 0], [peak, h], [n - 1, endV]]);
-  const down = rhythm.findIndex((r) => r.on >= 16);
+  const down = rhythm.findIndex((r) => r.on >= spb);
   if (down > peak + 1 && down < n - 2) anchors.set(down, Math.round((h + endV) / 2)); // the way down
   const idx = [...anchors.keys()].sort((a, b) => a - b);
   // a held note is arrived at, not struck again: adjacent anchors on one pitch become a step
@@ -270,8 +371,9 @@ const climaxOf = (m: Motif) => makeMotif(new Rng(m.seed), m.profile, 'short', 2)
 
 /** The motif's first bar, then a new second bar that ends on a long note (the answer, or the cadence). */
 function withTail(rng: Rng, m: Motif, dir: number): Motif {
-  const head = m.rhythm.filter((r) => r.on < 16);
-  const bar2 = cellNotes(rng.pick(TAIL_LONG), 1);
+  const spb = barOf(m.profile);
+  const head = m.rhythm.filter((r) => r.on < spb);
+  const bar2 = cellNotes(rng.pick(TAILS[m.profile.meter ?? '4/4'].long), 1, spb);
   const steps = m.steps.slice(0, head.length);
   for (let k = 0; k < bar2.length; k++) steps.push(k === 0 ? rng.pick([1, -1]) : dir);
   return { ...m, rhythm: [...head, ...bar2], steps };
@@ -310,12 +412,13 @@ export const invert = (m: Motif): Motif => ({ ...m, steps: m.steps.map((s, i) =>
 
 /** The first bar, twice, the second a step higher: fragmentation that drives towards the cadence. */
 export function fragment(m: Motif): Motif {
-  const head = m.rhythm.filter((r) => r.on < 16);
+  const spb = barOf(m.profile);
+  const head = m.rhythm.filter((r) => r.on < spb);
   const hs = m.steps.slice(0, head.length);
   const back = hs.slice(1).reduce((a, b) => a + b, 0);
   return {
     ...m,
-    rhythm: [...head, ...head.map((r) => ({ ...r, on: r.on + 16 }))],
+    rhythm: [...head, ...head.map((r) => ({ ...r, on: r.on + spb }))],
     steps: [...hs, 1 - back, ...hs.slice(1)],
   };
 }
@@ -449,7 +552,7 @@ function realize(ctx: Ctx, m: Motif, o: RealizeOpts, anchor?: number, ending?: '
   if (ending) {
     // the cadence is aimed at, not snapped to: a goal below (close) or near (open) the last note of the head,
     // reached by step through the second bar
-    const tail = sound.filter((i) => m.rhythm[i].on >= 16);
+    const tail = sound.filter((i) => m.rhythm[i].on >= barOf(p));
     const before = sound[sound.indexOf(tail[0]) - 1];
     if (tail.length && before !== undefined) {
       const from = ideal[before];
@@ -467,7 +570,7 @@ function realize(ctx: Ctx, m: Motif, o: RealizeOpts, anchor?: number, ending?: '
   let budget = p.appoggiaturas;
   const strongAt = (q: number) => {
     const r = m.rhythm[sound[q]];
-    return q === 0 || q === sound.length - 1 || (r.on * st) % 8 === 0 || r.len * st >= 8;
+    return q === 0 || q === sound.length - 1 || ctx.strong(r.on * st) || r.len * st >= 8;
   };
   // 1. the anchors are fitted to the chords (an accented non-chord tone may stay if it resolves by step)
   const anchors = sound.map((_, q) => q).filter(strongAt);
@@ -516,14 +619,16 @@ function realize(ctx: Ctx, m: Motif, o: RealizeOpts, anchor?: number, ending?: '
     if (len <= 2 * st && (passing || neighbour)) continue;
     out[i] = nearest(ctx, d, slotOf(i), endOf(i), p, o, pv, nx);
   }
-  // degrees a style avoids are stepped past in the direction the line is going, onto a note that fits
-  if (o.avoid?.length) {
+  // degrees a style (or a movement's character) avoids are stepped past in the direction the line is going,
+  // onto a note that fits
+  const avoid = o.avoid ?? p.avoid;
+  if (avoid?.length) {
     for (let q = 1; q < sound.length; q++) {
       const i = sound[q];
-      if (!o.avoid.includes(mod(out[i], 7))) continue;
+      if (!avoid.includes(mod(out[i], 7))) continue;
       const dir = out[i] >= out[sound[q - 1]] ? 1 : -1;
       const fits = (d: number) => classify(ctx, d, slotOf(i), p.tensions) !== 'nct';
-      const to = [out[i] + dir, out[i] - dir].find((d) => fits(d) && !o.avoid!.includes(mod(d, 7)));
+      const to = [out[i] + dir, out[i] - dir].find((d) => fits(d) && !avoid.includes(mod(d, 7)));
       if (to !== undefined) out[i] = to;
     }
   }
@@ -560,6 +665,7 @@ const MAX_NOTE = 93;
  * - aaba: A, A open, B a step above, A closed
  * - abab: A, B open, A reaching higher, A closed
  * - sequence: A, A a step higher, the climax a step higher again, closed
+ * A longer part (twelve bars) ends with a tag: its last line sung again, reaching and closing once more.
  */
 export function phrase(
   ctx: Ctx,
@@ -587,7 +693,10 @@ export function phrase(
     sequence: [[m, 0], [m, 1], [climax, 2], [close, 0, 'close']],
   };
   const slots = Math.floor(bars / (2 * st));
-  const plan: Slot[] = slots >= 4
+  const tag: Slot[] = [[climax, 0], [close, 0, 'close']];
+  const plan: Slot[] = slots >= 6
+    ? [...plans[form], ...tag]
+    : slots >= 4
     ? plans[form]
     : slots >= 2
     ? [[m, 0, 'open'], [withTail(new Rng(hash32(m.seed, 2)), climax, -1), 0, 'close']]
@@ -598,7 +707,7 @@ export function phrase(
   for (let k = 0; k < count; k++) {
     const [motif, rel, planned] = plan[k];
     const ending = k === count - 1 && cadence ? cadence : planned;
-    const step = (fromBar + 2 * st * k) * 16;
+    const step = (fromBar + 2 * st * k) * ctx.spb;
     const ns = realize(ctx, motif, { ...o, step }, anchor === undefined ? undefined : anchor + rel, ending);
     if (anchor === undefined && ns.length) anchor = ns[0].deg;
     placed.push(...ns);

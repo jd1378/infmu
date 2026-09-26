@@ -1,11 +1,12 @@
 // The song plan: an endless chain of movements, each a small piece in one style and key. Movement m depends
-// only on the seed and movement m-1 (for its key and style), so any point in the song can be reached by
-// planning the movements before it, which costs microseconds each. No audio is involved here.
+// only on the seed and the few movements before it (for its key, and for what it should not repeat), so any
+// point in the song can be reached by planning the movements before it, which costs microseconds each. No
+// audio is involved here.
 
 import { hash32, Rng } from './rng.ts';
 import { movementTitle, normalizeSeed, seedNumber } from './seed.ts';
 import { type ProgChord, PROGRESSIONS, ROLE_ENERGY, STYLE_IDS, type StyleDef, STYLES } from './styles.ts';
-import { Clock } from './tempo.ts';
+import { barSeconds, Clock } from './tempo.ts';
 import { type ChordSpec, type Key, mod } from './theory.ts';
 import type { Movement, Role, SectionDef, StyleId, Transition } from './types.ts';
 
@@ -77,6 +78,24 @@ export class Song {
     return { index: mv.firstSection, offset: 0 };
   }
 
+  /**
+   * Where the journey can go after movement m - 1: the styles its style leads to naturally, and less often any
+   * other the listener allowed, each weighed down by how recently it played. A listener who allowed one style
+   * hears it every time.
+   */
+  private nextStyles(m: number): [StyleId, number][] {
+    const prev = this.movements[m - 1];
+    const near = new Map(STYLES[prev.style].next);
+    const ago = (s: StyleId) => {
+      for (let d = 1; d <= RECENT && m - d >= 0; d++) if (this.movements[m - d].style === s) return d;
+      return Infinity;
+    };
+    const options = this.styles
+      .map((s): [StyleId, number] => [s, (near.get(s) ?? ELSEWHERE) * (FRESH[ago(s) - 1] ?? 1)])
+      .filter(([, w]) => w > 0);
+    return options.length ? options : [[prev.style, 1]];
+  }
+
   private findMovement(i: number): number {
     let lo = 0;
     let hi = this.movements.length - 1;
@@ -93,13 +112,10 @@ export class Song {
     const rng = new Rng(hash32(this.seed, m, 0x6d6f76));
     const pick = rng.fork('style');
 
-    let styleId: StyleId;
-    if (!prev) styleId = pick.pick(this.styles);
-    else {
-      const options = STYLES[prev.style].next.filter(([s]) => this.styles.includes(s));
-      styleId = options.length ? pick.weighted(options) : prev.style;
-    }
+    const styleId: StyleId = prev ? pick.weighted(this.nextStyles(m)) : pick.pick(this.styles);
     const style = STYLES[styleId];
+    const recent = this.movements.slice(Math.max(0, m - RECENT), m);
+    const sameStyle = recent.filter((x) => x.style === styleId);
 
     const keyRng = rng.fork('key');
     // modulate from where the last movement ended, which is above its key if its last chorus lifted
@@ -109,22 +125,49 @@ export class Song {
     if (prev && heard === tonic && prev.key.mode === mode) mode = keyRng.weighted(style.modes);
     const key: Key = { tonic, mode };
 
-    const bpm = Math.round(rng.fork('bpm').range(style.bpm[0], style.bpm[1] + 1) - 0.5);
+    const meter = rng.fork('meter').weighted(style.meters);
+    // bpm counts quarters; a 6/8 piece sways on its dotted quarters, at three quarters of the style's tempo
+    const pulse = meter === '6/8' ? 1.5 * 0.75 : 1;
+    // not the tempo of a piece of the same style (and time) heard lately
+    const tempo = (k: number) => Math.round(pulse * (rng.fork('bpm', k).range(style.bpm[0], style.bpm[1] + 1) - 0.5));
+    let bpm = tempo(0);
+    for (let k = 1; k < 8 && sameStyle.some((x) => x.meter === meter && Math.abs(x.bpm - bpm) < 4); k++) {
+      bpm = tempo(k);
+    }
     const swing = rng.fork('swing').range(style.swing[0], style.swing[1]);
-    const bar = (4 * 60) / bpm;
-    const transition = rng.fork('transition').weighted(style.transitions);
+    const bar = barSeconds({ bpm, meter });
+    // a piece rarely ends the way the one before it did
+    let transition = rng.fork('transition').weighted(style.transitions);
+    if (prev && transition === prev.transition) transition = rng.fork('transition', 1).weighted(style.transitions);
     const seed = hash32(this.seed, m);
     const form = planForm(style, rng.fork('form'), bar, transition, this.length);
-    const paced = { style: styleId, bpm, seed, transition, sections: form };
+    const paced = { style: styleId, bpm, meter, seed, transition, sections: form };
     const sections = form.map((s, k) => ({ ...s, seconds: new Clock(paced, k).duration }));
     const duration = sections.reduce((s, x) => s + x.seconds, 0);
 
     const h = rng.fork('harmony');
-    const pool = PROGRESSIONS[mode];
+    // now and then a piece changes chords twice as often as its style does, or half as often
+    const barsPerChord = rng.fork('harmonic rhythm').chance(0.25)
+      ? (3 - style.barsPerChord) as 1 | 2
+      : style.barsPerChord;
+    // at two bars a chord an eight-chord phrase would outlast a section
+    const pool = PROGRESSIONS[mode].filter((p) => barsPerChord === 1 || p.length === 4);
     const size = h.weighted(style.chordSize);
     const toChords = (p: readonly ProgChord[]): ChordSpec[] =>
-      p.map((c) => ({ deg: c.deg, size, alt: c.alt, sus: !c.alt && h.chance(style.sus2) ? 2 : undefined }));
-    const main = h.pick(pool);
+      p.map((c) => ({
+        deg: c.deg,
+        size,
+        alt: c.alt,
+        shift: c.shift,
+        sus: !c.alt && !c.shift && h.chance(style.sus2) ? 2 : undefined,
+      }));
+    // not the progression of a piece heard lately
+    const heardProg = (p: readonly ProgChord[]) =>
+      recent.some((x) =>
+        x.key.mode === mode && x.progressions.main.map((c) => c.deg).join() === p.map((c) => c.deg).join()
+      );
+    let main = h.pick(pool);
+    for (let k = 0; k < 6 && heardProg(main); k++) main = h.pick(pool);
     const lift = h.chance(0.45) ? main : h.pick(pool);
     const alt = h.pick(pool);
     // the bridge goes somewhere the other parts don't: a different progression, started from its middle
@@ -162,12 +205,14 @@ export class Song {
       style: styleId,
       key,
       bpm,
+      meter,
       swing,
       sections,
       firstSection: prev ? prev.firstSection + prev.sections.length : 0,
       startTime: prev ? prev.startTime + prev.duration : 0,
       duration,
       progressions: { main: toChords(main), lift: toChords(lift), alt: toChords(alt), bridge: toChords(bridge) },
+      barsPerChord,
       tone,
       mix,
       transition,
@@ -175,7 +220,14 @@ export class Song {
   }
 }
 
-export const barSeconds = (mv: Movement) => (4 * 60) / mv.bpm;
+/** How many movements back the journey remembers, so it doesn't repeat itself. */
+const RECENT = 4;
+/** A style heard d movements ago is this much less likely next (index d - 1); never the one just played. */
+const FRESH = [0, 0.2, 0.45, 0.7];
+/** Weight of a style its predecessor doesn't lead to naturally: the journey can still wander there. */
+const ELSEWHERE = 0.3;
+
+export { barSeconds };
 
 /**
  * A movement's form, fitted to a target length of three to four minutes: optional steps are dropped from
@@ -222,21 +274,25 @@ function planForm(
   // and as a last resort, eight-bar parts become four
   for (let k = steps.length - 2; k > 0 && seconds() > target + 15; k--) if (steps[k].bars === 8) steps[k].bars = 4;
 
-  // too short (a long piece): the song goes round again before its outro, a different way each time
+  // too short (a long piece): the song goes round again before its outro, a different way each time, with only
+  // the parts the style has
   const drops = steps.some((x) => x.role === 'drop');
-  const rounds = drops
-    ? [['break:8', 'build:4', 'drop:8'], ['bridge:8', 'build:8', 'drop:8', 'drop:8'], ['solo:8', 'drop:8']]
-    : [['verse:8', 'chorus:8'], ['solo:8', 'chorus:8'], ['bridge:8', 'chorus:8', 'chorus:8'], [
-      'break:4',
-      'verse:8',
-      'chorus:8',
-    ]];
+  const known = new Set(style.forms.flatMap((f) => f.split(' ').map((x) => x.split(':')[0])));
+  const has = (block: string[]) => block.every((x) => known.has(x.split(':')[0]));
+  const rounds =
+    (drops
+      ? [['break:8', 'build:4', 'drop:8'], ['bridge:8', 'build:8', 'drop:8', 'drop:8'], ['solo:8', 'drop:8']]
+      : [['verse:8', 'chorus:8'], ['solo:8', 'chorus:8'], ['bridge:8', 'chorus:8', 'chorus:8'], [
+        'break:4',
+        'verse:8',
+        'chorus:8',
+      ]]).filter(has);
   const blockBars = (block: string[]) => block.reduce((n, b) => n + Number(b.split(':')[1]), 0);
   for (let round = 0; round < 12 && seconds() < target - 20; round++) {
     // the next way round that fits without running long; if none fits, the piece is long enough
     // at slow tempos a whole way round can overshoot: then one more chorus (or drop), or a short break
-    const small = drops ? [['drop:8'], ['break:4']] : [['chorus:8'], ['break:4']];
-    const block = [...[0, 1, 2, 3].map((k) => rounds[(round + k) % rounds.length]), ...small]
+    const small = (drops ? [['drop:8'], ['break:4']] : [['chorus:8'], ['break:4']]).filter(has);
+    const block = [...[0, 1, 2, 3].map((k) => rounds[(round + k) % rounds.length]).filter(Boolean), ...small]
       .find((bl) => seconds() + blockBars(bl) * bar <= target + 25);
     if (!block) break;
     let at = steps.findIndex((x) => x.role === 'outro');
@@ -261,12 +317,15 @@ function planForm(
     if (k > 0 && steps.slice(0, k).some((s) => s.role === peak)) liftFrom = k;
   }
 
-  const energy = arc(steps);
+  // a bridge sometimes goes away to the key a fourth up (the subdominant), and the piece comes home after it
+  const away = rng.fork('away').chance(style.away) ? 5 : 0;
+
+  const energy = arc(steps, rng.fork('arc').pick(BURNS));
   const out: Omit<SectionDef, 'seconds'>[] = steps.map((s, i) => ({
     role: s.role,
     bars: s.bars,
     energy: energy[i],
-    shift: i >= liftFrom ? shift : 0,
+    shift: (i >= liftFrom ? shift : 0) + (s.role === 'bridge' ? away : 0),
   }));
   // an ending that fades or pauses is followed by a rest, so it's heard as an ending: about a bar after a
   // fade, a little longer after a pause (the outro's last chord rings out into it first)
@@ -279,15 +338,21 @@ function planForm(
   return out;
 }
 /**
+ * How a movement's arc grows (the power of its position): most climb steadily, some reach near their height
+ * early and hold it, some smoulder and burn late.
+ */
+const BURNS = [0.6, 1, 1, 1.8];
+
+/**
  * The movement's arc as each section's energy (0..1, the peak 1): it starts low, every return of a part is
  * bigger than the one before, breaks and bridges fall back, and the last chorus or drop is the peak. Loudness
  * follows it (see the style's dynamics): a piece builds instead of sitting at one level.
  */
-function arc(steps: readonly { role: Role; bars: number }[]): number[] {
+function arc(steps: readonly { role: Role; bars: number }[], burn = 1): number[] {
   const total = steps.reduce((n, s) => n + s.bars, 0);
   let at = 0;
   const raw = steps.map((s) => {
-    const pos = at / total;
+    const pos = (at / total) ** burn;
     at += s.bars;
     const calm = ['intro', 'outro', 'rest', 'break', 'bridge'].includes(s.role);
     return ROLE_ENERGY[s.role] + (calm ? 0.1 : 0.35) * pos;

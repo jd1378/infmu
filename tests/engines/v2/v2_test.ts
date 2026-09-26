@@ -1,9 +1,10 @@
 import { assert, assertAlmostEquals, assertEquals, assertNotEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v2/compose/index.ts';
-import { Ctx, sectionKey } from '../../../src/engines/v2/compose/context.ts';
+import { Ctx, sectionChords, sectionKey } from '../../../src/engines/v2/compose/context.ts';
 import { perform } from '../../../src/engines/v2/compose/perform.ts';
-import { Song } from '../../../src/engines/v2/plan.ts';
+import { barSeconds, Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
+import { CATHEDRAL_TIMES, DRIFT_TIMES, EMBER_TIMES, GARDEN_TIMES } from '../../../src/engines/v2/compose/grooves.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
 import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
 import { snare } from '../../../src/engines/v2/synth/instruments.ts';
@@ -38,7 +39,7 @@ Deno.test('a fading or paused hand-over ends in a rest', () => {
     assertEquals(last.role === 'rest', mv.transition === 'pause' || mv.transition === 'fade');
     if (last.role !== 'rest') continue;
     rests++;
-    const seconds = (last.bars * 240) / mv.bpm;
+    const seconds = last.bars * barSeconds(mv);
     assert(seconds >= 0.75 && seconds <= 3.7, `rest of ${seconds.toFixed(1)} s`);
     const score = composeSection(song, mv.firstSection + mv.sections.length - 1);
     assertEquals(score.events.length, 0);
@@ -226,9 +227,9 @@ Deno.test('every chorus of a movement restates the same hook on the same voice',
     const notes = all
       // a grace note leaning into the next is how a return is played, not what it plays
       .filter(([t], i) => !(all[i + 1] && all[i + 1][0] - t < 0.1))
-      // half a 16th before halfway: written notes sit on the grid, performed ones move less than that
-      .filter(([t]) => t < s.duration / 2 - 60 / s.bpm / 8);
-    // the first half as intervals (independent of a key lift; the ending may turn towards what comes next)
+      // the first four bars, to half a 16th before the fifth: written notes sit on the grid, performed ones move less
+      .filter(([t]) => t < s.bars[4] - 60 / s.bpm / 8);
+    // the first four bars as intervals (independent of a key lift; the ending may turn towards what comes next)
     return { voice, shape: notes.map((x, i, a) => (i ? x[1] - a[i - 1][1] : 0)).join(',') };
   };
   let checked = 0;
@@ -429,7 +430,10 @@ Deno.test('a drummer plays ghost notes well under the backbeat, and each limb wh
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
   const kick = mean(offsets((e) => e.i === 'kick'));
   const hats = mean(offsets((e) => e.i === 'hat'));
-  const backbeat = mean(offsets((e) => e.i === 'snare'));
+  // the backbeat itself: not a flam's grace stroke just before another snare
+  const flam = (e: Ev) =>
+    sections.some((x) => x.events.some((o) => o.i === 'snare' && o.t - e.t > 0.012 && o.t - e.t < 0.035));
+  const backbeat = mean(offsets((e) => e.i === 'snare' && !flam(e)));
   assert(hats < kick - 0.002, `hats ${((hats - kick) * 1000).toFixed(1)} ms from the kick`);
   assert(backbeat > kick + 0.003, `backbeat ${((backbeat - kick) * 1000).toFixed(1)} ms from the kick`);
 });
@@ -439,7 +443,7 @@ Deno.test("a sequencer's tempo never moves", () => {
     const mv = new Song(`steady-${style}`, [style]).movement(0);
     mv.sections.forEach((sec, k) => {
       assert(new Clock(mv, k).steady, `${style} ${sec.role} moves`);
-      assertEquals(sec.seconds, sec.bars * (240 / mv.bpm));
+      assertEquals(sec.seconds, sec.bars * barSeconds(mv));
     });
   }
 });
@@ -469,7 +473,7 @@ Deno.test("every part follows the section's clock", () => {
   const k = mv.sections.findLastIndex((x) => x.role !== 'rest');
   const s = composeSection(song, mv.firstSection + k);
   const clock = new Clock(mv, k);
-  assert(!clock.steady && s.duration > s.section.bars * (240 / mv.bpm), 'the last bars are not drawn out');
+  assert(!clock.steady && s.duration > s.section.bars * barSeconds(mv), 'the last bars are not drawn out');
   assertEquals(s.duration, mv.sections[k].seconds);
   for (const t of [0.3, 5, 17.2, s.duration + 2]) assertAlmostEquals(clock.written(clock.at(t)), t, 1e-9);
   assert(Math.abs(s.bars[s.bars.length - 1] - s.duration) < 1e-9);
@@ -635,7 +639,7 @@ Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and
   const k = mv.sections.findIndex((s) => s.role === 'bridge' || s.role === 'intro');
   const tempo = Array.from({ length: mv.sections[k].bars * 16 + 1 }, (_, j) => tempoAt(mv, k, j / 16));
   assert(Math.max(...tempo) / Math.min(...tempo) > 1.15, 'a calm phrase keeps one tempo');
-  const written = mv.sections[k].bars * (240 / mv.bpm);
+  const written = mv.sections[k].bars * barSeconds(mv);
   assert(Math.abs(mv.sections[k].seconds / written - 1) < 0.03, 'rubato stole time it never gave back');
 
   const verse = mv.sections.findIndex((s) => s.role === 'verse');
@@ -653,7 +657,7 @@ Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and
     leads.length > 3 && mean(leads) < -0.01,
     `the tune leads the chords by ${(-mean(leads) * 1000).toFixed(0)} ms`,
   );
-  const bar = 240 / mv.bpm;
+  const bar = barSeconds(mv);
   const down = chords.filter((e) => {
     const w = clock.written(e.t) / bar;
     return Math.abs(w - Math.round(w)) * bar < 0.06;
@@ -752,4 +756,98 @@ Deno.test('a piano is heard by two microphones, and its pedal wakes the strings 
   const pedalled = (style: StyleId) =>
     sectionsOf(`two-mics-${style}`, style).some((x) => x.events.some((e) => e.i === 'piano' && e.pedal));
   assert(pedalled('nocturne') && !pedalled('haze'));
+});
+
+Deno.test('a journey moves on: never one style twice in a row, rarely back to the one before', () => {
+  let back = 0;
+  let count = 0;
+  for (let k = 0; k < 6; k++) {
+    const song = new Song(`journey-${k}`);
+    for (let m = 1; m < 16; m++) {
+      const [a, b] = [song.movement(m - 1), song.movement(m)];
+      assert(a.style !== b.style, `${a.style} twice in a row`);
+      if (m > 1 && song.movement(m - 2).style === b.style) back++;
+      count++;
+    }
+  }
+  assert(back / count < 0.12, `${back} of ${count} went straight back to the style before`);
+  // a listener who allowed one style hears it every time
+  const one = new Song('journey', ['nocturne']);
+  for (let m = 0; m < 4; m++) assertEquals(one.movement(m).style, 'nocturne');
+});
+
+Deno.test('harmony: eight-chord phrases play through once, and a bridge may go away and come home', () => {
+  let eight = 0;
+  let away = 0;
+  for (let k = 0; k < 100; k++) {
+    const mv = new Song(`harmony-${k}`).movement(k % 5);
+    if (mv.progressions.main.length === 8) {
+      eight++;
+      assertEquals(mv.barsPerChord, 1);
+      const verse = mv.sections.findIndex((s) => s.role === 'verse' && s.bars === 8);
+      if (verse >= 0) assertEquals(sectionChords(mv, verse).length, 8);
+    }
+    const bridge = mv.sections.findIndex((s) => s.role === 'bridge');
+    if (bridge > 0 && mv.sections[bridge].shift - mv.sections[bridge - 1].shift === 5) {
+      away++;
+      const after = mv.sections.slice(bridge).findIndex((s) => s.role !== 'bridge') + bridge;
+      assertEquals(mv.sections[after].shift % 12, mv.sections[bridge - 1].shift % 12, 'the piece never came home');
+    }
+  }
+  assert(eight >= 5 && away >= 5, `${eight} eight-chord phrases, ${away} bridges away`);
+});
+
+Deno.test('a piece only has parts its style knows how to play', () => {
+  for (const style of STYLE_IDS) {
+    const known = new Set(STYLES[style].forms.flatMap((f) => f.split(' ').map((x) => x.split(':')[0])));
+    known.add('rest');
+    for (const length of ['short', 'standard', 'long'] as const) {
+      const song = new Song(`parts-${style}`, [style], length);
+      for (let m = 0; m < 4; m++) {
+        for (const s of song.movement(m).sections) assert(known.has(s.role), `${style} ${length} plays a ${s.role}`);
+      }
+    }
+  }
+});
+
+Deno.test('some pieces sway in three: waltzes and 6/8, with bars of three beats and tunes on them', () => {
+  const seen = new Set<string>();
+  for (const style of STYLE_IDS) {
+    for (let k = 0; k < 24; k++) {
+      const mv = new Song(`meter-${style}-${k}`, [style]).movement(0);
+      if (!STYLES[style].meters.some(([m]) => m === mv.meter)) throw new Error(`${style} in ${mv.meter}`);
+      seen.add(`${style} ${mv.meter}`);
+    }
+  }
+  for (const s of ['nocturne 3/4', 'nocturne 6/8', 'garden 6/8', 'ember 6/8', 'cathedral 3/4', 'drift 6/8']) {
+    assert(seen.has(s), `no ${s}`);
+  }
+  for (const s of ['rise', 'acid', 'pulse', 'haze']) assert(!seen.has(`${s} 3/4`) && !seen.has(`${s} 6/8`));
+  // every groove in three fits its bar of twelve 16ths
+  for (const banks of [DRIFT_TIMES, GARDEN_TIMES, EMBER_TIMES, CATHEDRAL_TIMES]) {
+    for (const meter of ['3/4', '6/8'] as const) {
+      for (const [g] of banks[meter] ?? []) {
+        for (const bar of [g.light, g.full, g.fill, g.answer, g.layer]) {
+          for (const lane of Object.values(bar ?? {})) assertEquals((lane as string).length, 12, `${g.name}`);
+        }
+        for (const [step, len] of [...g.bassLight, ...g.bassFull]) assert(step + len <= 12, `${g.name} bass`);
+      }
+    }
+  }
+  // a waltz: bar lines three beats apart, and its tune mostly on the beats
+  let waltz: ReturnType<typeof composeSection> | undefined;
+  for (let k = 0; k < 60 && !waltz; k++) {
+    const song = new Song(`waltz-${k}`, ['nocturne']);
+    const mv = song.movement(0);
+    const v = mv.sections.findIndex((x) => x.role === 'verse');
+    if (mv.meter === '3/4' && v >= 0) waltz = composeSection(song, mv.firstSection + v);
+  }
+  assert(waltz, 'no waltz');
+  const mv = waltz.movement;
+  const beat = 60 / mv.bpm;
+  assertAlmostEquals(barSeconds(mv), 3 * beat, 1e-9);
+  const clock = new Clock(mv, waltz.local);
+  const tune = waltz.events.filter(isMelody).map((e) => clock.written(e.t) / beat);
+  const onBeat = tune.filter((q) => Math.abs(q - Math.round(q)) < 0.06).length;
+  assert(tune.length > 6 && onBeat / tune.length > 0.5, `${onBeat} of ${tune.length} notes on a beat`);
 });

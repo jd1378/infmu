@@ -18,6 +18,15 @@ export type Role =
 /** How a movement hands over to the next one. */
 export type Transition = 'fade' | 'swell' | 'stop' | 'pause';
 
+/**
+ * A movement's time: four beats, a waltz's three, or two lilting beats of three eighths each. Both triple times
+ * have twelve 16ths in a bar; the movement's bpm counts quarter notes in all three.
+ */
+export type Meter = '4/4' | '3/4' | '6/8';
+
+/** 16ths in a bar of `meter`. */
+export const stepsPerBar = (meter: Meter): 12 | 16 => (meter === '4/4' ? 16 : 12);
+
 export interface SectionDef {
   role: Role;
   bars: number;
@@ -63,6 +72,7 @@ export interface Movement {
   style: StyleId;
   key: Key;
   bpm: number;
+  meter: Meter;
   swing: number; // 0 = straight; delays every other 16th by this fraction of a 16th
   sections: SectionDef[];
   /** Global index of this movement's first section. */
@@ -71,6 +81,8 @@ export interface Movement {
   startTime: number;
   duration: number;
   progressions: Record<'main' | 'lift' | 'alt' | 'bridge', ChordSpec[]>;
+  /** Bars each chord of a progression lasts. */
+  barsPerChord: 1 | 2;
   tone: Tone;
   mix: Mix;
   transition: Transition;

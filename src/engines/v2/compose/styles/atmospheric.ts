@@ -1,11 +1,12 @@
 // Drift (ambient), Cathedral (cinematic) and Ember (post-rock).
 
 import type { Ctx } from '../context.ts';
-import { CATHEDRAL, DRIFT, EMBER, grooveBar, grooveFor, playGroove } from '../grooves.ts';
+import { CATHEDRAL_TIMES, DRIFT_TIMES, EMBER_TIMES, grooveBar, grooveFor, inTime, playGroove } from '../grooves.ts';
 import {
   choir,
   chorusMelody,
   halves,
+  introPreview,
   motifs,
   play,
   ringOut,
@@ -14,6 +15,7 @@ import {
   sing,
   solo,
   stopBefore,
+  versePlan,
   type Voice,
   voiceFrom,
 } from '../helpers.ts';
@@ -38,8 +40,9 @@ import {
 export function drift(ctx: Ctx): void {
   const { bars, mrng, rng } = ctx;
   const { half } = halves(ctx);
-  const { a: motif, b: motifB } = motifs(ctx);
-  const g = grooveFor(ctx, DRIFT);
+  const { a: motif, b: motifB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'none');
+  const g = grooveFor(ctx, inTime(ctx, DRIFT_TIMES));
   const avoid = [3, 6];
   const leads: Voice[] = [
     'bell',
@@ -67,12 +70,14 @@ export function drift(ctx: Ctx): void {
       ctx.push({ i: 'drone', t: 0, d: ctx.duration + 2, n: ctx.tonicLow + 12 });
       padChords(ctx, 'warm', { cut: (_, i) => [1100 + 400 * i, 1600 + 400 * i], g: 0.75 });
       shimmer(half, bars, 0.3);
+      introPreview(ctx, second, motif, { center: 4, lo: 0, hi: 11, stretch: 2, avoid });
       break;
     case 'verse':
       padChords(ctx, 'warm', { cut: () => [1600, 2800], g: 0.8 });
       sustainedBass(ctx, 'sub', 0.3);
       shimmer(0, bars, 0.4);
-      for (let b = 1; b < bars; b += 2) {
+      if (verse === 'own') sing(ctx, second, own, { center: 3, lo: -1, hi: 9, stretch: 2, avoid, velocity: 0.8 });
+      for (let b = 1; b < bars && verse !== 'own'; b += 2) {
         const n = rng.pick(ctx.chordAt(b).voicing) + 12;
         play(
           ctx,
@@ -131,10 +136,11 @@ export function drift(ctx: Ctx): void {
 export function cathedral(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx);
+  const { a: hook, b: hookB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'hook');
   const first = ctx.chords[0];
   const guitars = mrng.fork('guitars').chance(0.35);
-  const g = grooveFor(ctx, CATHEDRAL);
+  const g = grooveFor(ctx, inTime(ctx, CATHEDRAL_TIMES));
   const epic = { kit: { kick: 'big', snare: 'huge', sc: 0.4 }, bass: 'saw', bassGain: 0, withBass: false } as const;
   // the taiko of the movement's groove alone (a build swells them)
   const taiko = (b: number, v: number) =>
@@ -143,9 +149,16 @@ export function cathedral(ctx: Ctx): void {
   const power = (b: number, v: number) => {
     const r = ctx.root(ctx.chordAt(b));
     const root = r < 40 ? r + 12 : r;
-    for (let s = 0; s < 16; s += 2) {
+    for (let s = 0; s < ctx.spb; s += 2) {
       for (const n of [root, root + 7, root + 12]) {
-        ctx.push({ i: 'string', t: ctx.barAt(b, s), n, v: v * (s % 4 ? 0.8 : 1), k: 'overdrive', d: ctx.s16 * 1.6 });
+        ctx.push({
+          i: 'string',
+          t: ctx.barAt(b, s),
+          n,
+          v: v * (ctx.onBeat(s) ? 1 : 0.8),
+          k: 'overdrive',
+          d: ctx.s16 * 1.6,
+        });
       }
     }
   };
@@ -163,7 +176,7 @@ export function cathedral(ctx: Ctx): void {
         playGroove(ctx, g, b, { ...epic, gain: 0.7 });
         pick(ctx, b, 'harp', [0, 2, 3, 4, 5, 4, 3, 2], 2, 0.4, 48);
       }
-      sing(ctx, 'brass', hook, {
+      sing(ctx, 'brass', verse === 'own' ? own : hook, {
         center: 0,
         lo: -4,
         hi: 6,
@@ -202,7 +215,7 @@ export function cathedral(ctx: Ctx): void {
         if (b >= half) drums(ctx, b, { kick: 'x...x...x...x...' }, { kick: 'big', sc: 0.3 }, 0.85);
       }
       // the arp climbs a rung every beat, from the bass register to the top of the piano
-      const total = bars * 16;
+      const total = bars * ctx.spb;
       for (let s = 0; s < total; s++) {
         const slot = ctx.chordAtStep(s);
         const lad = [...arpNotes(slot, 55), ...arpNotes(slot, 67).slice(1), ...arpNotes(slot, 79).slice(1)];
@@ -291,12 +304,13 @@ const EMBER_LEADS: Voice[] = [
 export function ember(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx);
+  const { a: hook, b: hookB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'hook');
   const lead = voiceFrom(ctx, EMBER_LEADS);
   const second = voiceFrom(ctx, ['mallet:vibes', 'bell', 'mallet:kalimba'], lead);
   const tremolo = mrng.fork('tremolo').chance(0.5);
   const rim = { kick: 'big', snare: 'rim', sc: 0.25 } as const;
-  const g = grooveFor(ctx, EMBER);
+  const g = grooveFor(ctx, inTime(ctx, EMBER_TIMES));
   const full = { kick: 'big', snare: 'big', sc: 0.35 } as const;
   // the clean guitar that carries the piece: a delayed arpeggio, or tremolo-picked chord tones
   // the clean guitar that carries the piece, at the density the form asks for: space (quarters) in intros,
@@ -315,7 +329,7 @@ export function ember(ctx: Ctx): void {
     const r = ctx.root(ctx.chordAt(b));
     const low = r < 40 ? r + 12 : r;
     const ns = [low, low + 7, low + 12];
-    for (const s of [0, 8]) {
+    for (const s of ctx.strongs) {
       for (const [k, n] of ns.entries()) {
         ctx.push({
           i: 'string',
@@ -323,7 +337,7 @@ export function ember(ctx: Ctx): void {
           n,
           v: v * (s ? 0.8 : 1),
           k: 'overdrive',
-          d: ctx.s16 * 8,
+          d: ctx.s16 * (ctx.spb / ctx.strongs.length),
         });
       }
     }
@@ -333,6 +347,7 @@ export function ember(ctx: Ctx): void {
     case 'intro':
       padChords(ctx, 'warm', { cut: (slot) => runCut(ctx, slot, 800, 2600), g: 0.55 });
       for (let b = 0; b < bars; b++) clean(b, 0.35 + 0.25 * ctx.runAt(b / bars), ctx.runAt(b / bars) < 0.5 ? 0 : 1);
+      introPreview(ctx, second, hook, { center: 4, lo: 0, hi: 12 });
       break;
     case 'verse':
       padChords(ctx, 'warm', { cut: () => [1200, 1600], g: 0.45 });
@@ -340,7 +355,8 @@ export function ember(ctx: Ctx): void {
         clean(b, 0.55);
         playGroove(ctx, g, b, { kit: rim, bass: 'round', bassGain: 0.7, gain: 0.85 });
       }
-      if (ctx.returning) sing(ctx, lead, hook, { center: 5, lo: 1, hi: 12, stretch: 2 });
+      if (verse === 'own') sing(ctx, lead, own, { center: 4, lo: 0, hi: 11 });
+      else if (ctx.returning) sing(ctx, lead, hook, { center: 5, lo: 1, hi: 12, stretch: 2 });
       break;
     case 'build':
       // a build of several sections swells once: the wall of guitars arrives halfway through the whole build

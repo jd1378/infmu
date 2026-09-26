@@ -8,9 +8,12 @@ import { type ChordSlot, type Ctx, PAD_HI, PAD_LO, sectionChords } from './conte
 
 const VEL: Record<string, number> = { x: 1, o: 0.72, '-': 0.42 };
 
-/** Calls `fn` for each hit in a grid string: x = full, o = medium, - = ghost, anything else = rest. */
-export function grid(pattern: string, fn: (step: number, v: number) => void): void {
-  for (let s = 0; s < pattern.length; s++) {
+/**
+ * Calls `fn` for each hit in a grid string: x = full, o = medium, - = ghost, anything else = rest. Steps from
+ * `limit` on are ignored: a bar in three plays only the first twelve of a pattern written in four.
+ */
+export function grid(pattern: string, fn: (step: number, v: number) => void, limit = pattern.length): void {
+  for (let s = 0; s < Math.min(pattern.length, limit); s++) {
     const v = VEL[pattern[s]];
     if (v) fn(s, v);
   }
@@ -46,6 +49,7 @@ export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1)
       p.kick,
       (s, v) =>
         ctx.push({ i: 'kick', t: t(s), v: v * gain, k: kit.kick ?? 'big', sc: (kit.sc ?? 0.4) * v, n: ctx.kickNote }),
+      ctx.spb,
     );
   }
   if (p.snare) {
@@ -58,6 +62,7 @@ export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1)
           v: v * gain * (0.94 + 0.06 * r.next()),
           k: kit.snare ?? 'big',
         }),
+      ctx.spb,
     );
   }
   const hg = gain * (kit.hats ?? 1);
@@ -65,11 +70,16 @@ export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1)
     grid(
       p.hat,
       (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg * (0.82 + 0.18 * r.next()), k: kit.hat ?? 'closed' }),
+      ctx.spb,
     );
   }
-  if (p.open) grid(p.open, (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg, k: 'open' }));
+  if (p.open) grid(p.open, (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg, k: 'open' }), ctx.spb);
   if (p.shaker) {
-    grid(p.shaker, (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg * (0.8 + 0.2 * r.next()), k: 'shaker' }));
+    grid(
+      p.shaker,
+      (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg * (0.8 + 0.2 * r.next()), k: 'shaker' }),
+      ctx.spb,
+    );
   }
 }
 
@@ -95,12 +105,14 @@ export function roll(
 }
 
 /**
- * A build's roll across its whole run of sections: quarters, then eighths, then sixteenths, velocity rising
+ * A build's roll across its whole run of sections: beats, then eighths, then sixteenths, velocity rising
  * throughout; each section writes the hits that fall inside it.
  */
 export function runRoll(ctx: Ctx, v0: number, v1: number, k: SnareKind = 'roll'): void {
   const T = ctx.runBars;
-  const plan: [number, number][] = [[T / 2, T * 2], [T / 4, T * 2], [T / 4, T * 4]];
+  // hits a bar at each stage, in the movement's time: its beats, then eighths, then 16ths
+  const [a, b, c] = ctx.mv.meter === '4/4' ? [4, 8, 16] : ctx.mv.meter === '3/4' ? [3, 6, 12] : [2, 6, 12];
+  const plan: [number, number][] = [[T / 2, (T / 2) * a], [T / 4, (T / 4) * b], [T / 4, (T / 4) * c]];
   const hits: number[] = [];
   let start = 0;
   for (const [bars, n] of plan) {
@@ -125,7 +137,7 @@ export function runRiser(ctx: Ctx, k: 'build' | 'sweep', sweep: boolean): void {
 /** Four toms falling through the chord on the last beat of a bar. */
 export function tomFill(ctx: Ctx, bar: number, slot: ChordSlot, v = 0.8): void {
   const ns = slot.voicing.slice().sort((a, b) => b - a).slice(0, 4).map((n) => n - 12);
-  ns.forEach((n, i) => ctx.push({ i: 'tom', t: ctx.barAt(bar, 12 + i), v: v * (0.85 + 0.05 * i), n }));
+  ns.forEach((n, i) => ctx.push({ i: 'tom', t: ctx.barAt(bar, ctx.spb - 4 + i), v: v * (0.85 + 0.05 * i), n }));
 }
 
 // ------------------------------------------------------------------ bass
@@ -252,9 +264,9 @@ export function arp(
   const slot = ctx.chordAt(bar);
   const ns = arpNotes(slot, o.from ?? 62);
   const rate = o.rate ?? 1;
-  for (let s = 0; s < 16; s += rate) {
+  for (let s = 0; s < ctx.spb; s += rate) {
     // a global step counter keeps the 3-note hemiola drifting across bar lines
-    const g = bar * 16 + s + ctx.local * 997;
+    const g = bar * ctx.spb + s + ctx.local * 997;
     const k = s / rate;
     let n: number;
     switch (shape) {
@@ -278,8 +290,8 @@ export function arp(
       i: 'pluck',
       t: ctx.barAt(bar, s),
       n,
-      v: o.v * (s % 4 ? 0.72 : 1),
-      cut: o.cut((bar + s / 16) / ctx.bars),
+      v: o.v * (ctx.onBeat(s) ? 1 : 0.72),
+      cut: o.cut((bar + s / ctx.spb) / ctx.bars),
       p: k % 2 ? 0.35 : -0.35,
       dec: o.dec,
     });
@@ -369,6 +381,19 @@ export function strum(
   ns.forEach((n, i) => ctx.push({ i: 'string', t: t + i * 0.011, n, v: v * (up ? 0.8 : 1) * (1 - 0.04 * i), k, d }));
 }
 
+/**
+ * A bar of strumming in the movement's time: down, a lighter up on the "and", down again (four); down, up, down on
+ * the beats (a waltz); down on each dotted beat with an up between (6/8).
+ */
+export function strumBar(ctx: Ctx, bar: number, ns: readonly number[], k: StringKind, v: number): void {
+  const plan: [number, number, boolean][] = ctx.mv.meter === '4/4'
+    ? [[0, 1, false], [6, 0.7, true], [10, 0.85, false]]
+    : ctx.mv.meter === '3/4'
+    ? [[0, 1, false], [4, 0.75, true], [8, 0.8, false]]
+    : [[0, 1, false], [4, 0.6, true], [6, 0.85, false], [10, 0.6, true]];
+  for (const [s, g, up] of plan) strum(ctx, ctx.barAt(bar, s), up ? ns.slice(2) : ns, k, v * g, undefined, up);
+}
+
 /** Fingerpicking or an arpeggio on a plucked string instrument, one bar, from a pattern of voicing indices. */
 export function pick(
   ctx: Ctx,
@@ -380,19 +405,26 @@ export function pick(
   low = 40,
 ): void {
   const ns = guitarVoicing(ctx.chordAt(bar), low);
-  for (let s = 0, j = 0; s < 16; s += every, j++) {
+  for (let s = 0, j = 0; s < ctx.spb; s += every, j++) {
     const i = idx[j % idx.length];
     if (i < 0) continue;
-    ctx.push({ i: 'string', t: ctx.barAt(bar, s), n: ns[Math.min(ns.length - 1, i)], v: v * (s % 4 ? 0.8 : 1), k });
+    ctx.push({
+      i: 'string',
+      t: ctx.barAt(bar, s),
+      n: ns[Math.min(ns.length - 1, i)],
+      v: v * (ctx.onBeat(s) ? 1 : 0.8),
+      k,
+    });
   }
 }
 
 export type PianoFigure = 'broken' | 'alberti' | 'block' | 'rolling';
 
 /**
- * The left hand under a piano melody, one bar: a figure over the chord's root, fifth and tenth. A pianist shapes
- * it: the bass note on the downbeat carries the harmony and is played fullest, the middle of the bar a little
- * less, and an arpeggio leans a little into its upper notes and falls back with them.
+ * The left hand under a piano melody, one bar: a figure over the chord's root, fifth and tenth, in the movement's
+ * time. A pianist shapes it: the bass note on the downbeat carries the harmony and is played fullest, a later
+ * strong beat a little less, and an arpeggio leans a little into its upper notes and falls back with them. In a
+ * waltz the block chords become oom-pah-pah; in 6/8 every figure rocks in two groups of three.
  */
 export function pianoBar(ctx: Ctx, bar: number, fig: PianoFigure, v: number): void {
   const slot = ctx.chordAt(bar);
@@ -400,25 +432,39 @@ export function pianoBar(ctx: Ctx, bar: number, fig: PianoFigure, v: number): vo
   const up = arpNotes(slot, root);
   const t = (s: number) => ctx.barAt(bar, s);
   const shaped = (s: number, i: number) =>
-    s === 0 ? 1 : s === 8 && i === 0 ? 0.85 : 0.64 + (0.22 * i) / Math.max(1, up.length - 1);
+    s === 0 ? 1 : ctx.strong(s) && i === 0 ? 0.85 : 0.64 + (0.22 * i) / Math.max(1, up.length - 1);
   const figure = (steps: readonly number[], idx: readonly number[], d: number) =>
     steps.forEach((s, k) => {
       const i = idx[k % idx.length] % up.length;
       ctx.push({ i: 'piano', t: t(s), d: d * ctx.s16, n: [up[i]], v: v * shaped(s, i) });
     });
+  const chord = (s: number, d: number, vv: number, notes = [up[0], up[1], up[2]]) =>
+    ctx.push({ i: 'piano', t: t(s), d: d * ctx.s16, n: notes, v: v * vv });
+  const eighths = Array.from({ length: ctx.spb / 2 }, (_, k) => 2 * k);
+  const six = ctx.mv.meter === '6/8';
   switch (fig) {
     case 'broken':
-      figure([0, 2, 4, 6, 8, 10, 12, 14], [0, 2, 1, 3, 4, 3, 1, 2], 3);
+      figure(eighths, ctx.spb === 16 ? [0, 2, 1, 3, 4, 3, 1, 2] : six ? [0, 2, 4, 3, 4, 2] : [0, 2, 4, 3, 2, 1], 3);
       break;
     case 'alberti':
-      figure([0, 2, 4, 6, 8, 10, 12, 14], [0, 2, 1, 2], 2);
+      figure(eighths, [0, 2, 1, 2], 2);
       break;
     case 'rolling':
-      figure([...Array(16).keys()], [0, 1, 2, 3, 4, 3, 2, 1], 2);
+      figure([...Array(ctx.spb).keys()], six ? [0, 1, 2, 3, 2, 1] : [0, 1, 2, 3, 4, 3, 2, 1], 2);
       break;
     case 'block':
-      ctx.push({ i: 'piano', t: t(0), d: 7.5 * ctx.s16, n: [up[0], up[1], up[2]], v: v * 0.9 });
-      ctx.push({ i: 'piano', t: t(8), d: 7.5 * ctx.s16, n: [up[0], up[1], up[2]], v: v * 0.75 });
+      if (ctx.spb === 16) {
+        chord(0, 7.5, 0.9);
+        chord(8, 7.5, 0.75);
+      } else if (six) {
+        chord(0, 5.5, 0.9);
+        chord(6, 5.5, 0.75);
+      } else {
+        // oom-pah-pah
+        chord(0, 3.5, 0.9, [up[0]]);
+        chord(4, 3.5, 0.7, [up[1], up[2], up[3] ?? up[4]]);
+        chord(8, 3.5, 0.62, [up[1], up[2], up[3] ?? up[4]]);
+      }
       break;
   }
 }
@@ -442,14 +488,18 @@ export function percBar(ctx: Ctx, bar: number, p: PercBar, gain = 1): void {
     const tune = DRUM_TUNING[k];
     const n = tune === undefined ? undefined : ctx.tonicLow + tune;
     if (pat) {
-      grid(pat, (s, v) =>
-        ctx.push({
-          i: 'perc',
-          t: Math.max(0, ctx.barAt(bar, s) + r.jitter(0.004)),
-          v: v * gain * (0.85 + 0.15 * r.next()),
-          k,
-          n,
-        }));
+      grid(
+        pat,
+        (s, v) =>
+          ctx.push({
+            i: 'perc',
+            t: Math.max(0, ctx.barAt(bar, s) + r.jitter(0.004)),
+            v: v * gain * (0.85 + 0.15 * r.next()),
+            k,
+            n,
+          }),
+        ctx.spb,
+      );
     }
   }
 }

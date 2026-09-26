@@ -2,7 +2,7 @@
 // A movement picks one groove and keeps it. Sections vary it only in the ways written here (light or full, the
 // layer, the answer bar, the fill), so a piece stays coherent while pieces of one style sound different.
 
-import type { BassKind } from '../types.ts';
+import type { BassKind, Meter } from '../types.ts';
 import { hash32, Rng } from '../rng.ts';
 import type { Ctx } from './context.ts';
 import { bassFigure, type BassHit, type DrumBar, type DrumKit, drums, grid, type PercBar, percBar } from './parts.ts';
@@ -46,6 +46,10 @@ export interface Groove {
 
 export type Weighted<T> = readonly (readonly [T, number])[];
 
+/** A style's banks for each time it plays in: the movement's time picks one (four when it has no other). */
+export type Banks<G extends Groove = Groove> = { '4/4': Weighted<G> } & Partial<Record<Meter, Weighted<G>>>;
+export const inTime = <G extends Groove>(ctx: Ctx, banks: Banks<G>): Weighted<G> => banks[ctx.mv.meter] ?? banks['4/4'];
+
 /** The lanes of one bar; `runBar` counts from the start of the run, so phrases line up across sections. */
 export function grooveLanes(g: Groove, full: boolean, runBar: number, layer: boolean, fill: boolean): GrooveBar {
   return {
@@ -69,7 +73,7 @@ export function grooveBar(ctx: Ctx, bar: number, p: GrooveBar, kit: DrumKit, gai
   const t = (s: number) => Math.max(0, ctx.barAt(bar, s) + ctx.rng.jitter(0.005));
   const lo = ctx.tonicLow + 12;
   for (const [pat, n] of [[p.lo, lo], [p.mid, lo + 7], [p.hi, lo + 12]] as const) {
-    if (pat) grid(pat, (s, v) => ctx.push({ i: 'tom', t: t(s), v: v * gain, n }));
+    if (pat) grid(pat, (s, v) => ctx.push({ i: 'tom', t: t(s), v: v * gain, n }), ctx.spb);
   }
 }
 
@@ -116,22 +120,24 @@ function fillOf(ctx: Ctx, g: Groove, full: boolean, rb: number, layer: boolean):
   const base = grooveLanes(g, full, rb, layer, false);
   const out: GrooveBar = { ...written };
   const lanes = Object.keys(g.fill) as (keyof GrooveBar)[];
+  const spb = ctx.spb;
+  const rest = '.'.repeat(spb);
   switch (rng.weighted(ways)) {
     case 'late':
-      for (const k of lanes) out[k] = (base[k] ?? '.'.repeat(16)).slice(0, 8) + (written[k] ?? '').slice(8);
+      for (const k of lanes) out[k] = (base[k] ?? rest).slice(0, spb / 2) + (written[k] ?? '').slice(spb / 2);
       break;
     case 'pickup': {
-      const sn = [...(written.snare ?? '.'.repeat(16))];
-      for (let s = 12; s < 16; s++) if (sn[s] === '.') sn[s] = '-';
+      const sn = [...(written.snare ?? rest)];
+      for (let s = spb - 4; s < spb; s++) if (sn[s] === '.') sn[s] = '-';
       out.snare = sn.join('');
       break;
     }
     case 'toms': {
-      const sn = [...(written.snare ?? '.'.repeat(16))];
-      const toms = { hi: [...'.'.repeat(16)], mid: [...'.'.repeat(16)], lo: [...'.'.repeat(16)] };
+      const sn = [...(written.snare ?? rest)];
+      const toms = { hi: [...rest], mid: [...rest], lo: [...rest] };
       const order = ['hi', 'hi', 'mid', 'lo'] as const;
       let k = 0;
-      for (let s = 12; s < 16; s++) {
+      for (let s = spb - 4; s < spb; s++) {
         if (sn[s] === '.') continue;
         toms[order[Math.min(3, k++)]][s] = sn[s];
         sn[s] = '.';
@@ -1039,3 +1045,161 @@ export const DRIFT: Weighted<Groove> = [
     bassKind: 'round',
   }, 1],
 ];
+
+// ------------------------------------------------------------------ in three
+// The styles that can sway: a waltz's three quarters (beats on 0, 4, 8 of twelve 16ths) or 6/8's two dotted beats
+// (on 0 and 6, eighths on the even steps).
+
+export const DRIFT_TIMES: Banks = {
+  '4/4': DRIFT,
+  '3/4': [
+    [{ name: 'still', light: {}, full: {}, fill: {}, bassLight: [[0, 12, 0, 0.85]], bassFull: [[0, 12, 0, 1]] }, 4],
+    [{
+      name: 'shaker waltz',
+      kit: DRIFT_KIT,
+      light: {},
+      full: { shaker: 'o.-.o.-.o.-.' },
+      fill: {},
+      layer: { shaker: '-...-...-...' },
+      bassLight: [[0, 12, 0, 0.85]],
+      bassFull: [[0, 12, 0, 1]],
+    }, 3],
+    [{
+      name: 'heartbeat in three',
+      kit: { ...DRIFT_KIT, sc: 0.1 },
+      light: { kick: 'o-..........' },
+      full: { kick: 'o-......o...' },
+      fill: {},
+      bassLight: [[0, 12, 0, 0.85]],
+      bassFull: [[0, 8, 0, 1], [8, 4, 7, 0.7]],
+    }, 1],
+  ],
+  '6/8': [
+    [{ name: 'still', light: {}, full: {}, fill: {}, bassLight: [[0, 12, 0, 0.85]], bassFull: [[0, 12, 0, 1]] }, 4],
+    [{
+      name: 'shaker sway',
+      kit: DRIFT_KIT,
+      light: {},
+      full: { shaker: 'o.-.-.o.-.-.' },
+      fill: {},
+      layer: { shaker: '-.....-.....' },
+      bassLight: [[0, 12, 0, 0.85]],
+      bassFull: [[0, 12, 0, 1]],
+    }, 3],
+    [{
+      name: 'rocking heartbeat',
+      kit: { ...DRIFT_KIT, sc: 0.1 },
+      light: { kick: 'o-..........' },
+      full: { kick: 'o-....o-....' },
+      fill: {},
+      bassLight: [[0, 12, 0, 0.85]],
+      bassFull: [[0, 6, 0, 1], [6, 6, 7, 0.75]],
+    }, 1],
+  ],
+};
+
+export const GARDEN_TIMES: Banks = {
+  '4/4': GARDEN,
+  '6/8': [
+    [{
+      // the West African bell: its twelve-eighth pattern spread over a bar and its answer
+      name: 'bell six',
+      light: { kick: 'x.....x.....', shaker: 'o.-.-.o.-.-.', congaHi: '......x.....' },
+      full: {
+        kick: 'x.....x.....',
+        snare: '......o.....',
+        shaker: 'o.-.-.o.-.-.',
+        cowbell: 'x...x...x.x.',
+        congaHi: '......x.....',
+        conga: '..........o.',
+      },
+      answer: { cowbell: '..x...x...x.' },
+      fill: { congaHi: '......x.x.x.', conga: '..........xx' },
+      layer: { bongo: '..-...-...-.' },
+      bassLight: [[0, 6, 0, 1], [6, 6, 7, 0.85]],
+      bassFull: [[0, 4, 0, 1], [4, 2, 12, 0.6], [6, 4, 7, 0.9], [10, 2, 'A', 0.7]],
+    }, 3],
+    [{
+      name: 'lullaby sway',
+      light: { kick: 'x...........', shaker: '-.-.-.-.-.-.', conga: '......o.....' },
+      full: { kick: 'x.....o.....', snare: '......o.....', shaker: 'o.-.-.o.-.-.', congaHi: '....x.....x.' },
+      fill: { conga: '......x.x.xx' },
+      layer: { snap: '......o.....' },
+      bassLight: [[0, 6, 0, 1], [6, 6, 0, 0.8]],
+      bassFull: [[0, 6, 0, 1], [6, 4, 7, 0.85], [10, 2, 'A', 0.7]],
+    }, 2],
+  ],
+};
+
+export const EMBER_TIMES: Banks = {
+  '4/4': EMBER,
+  '3/4': [
+    [{
+      name: 'post-rock waltz',
+      light: { kick: 'x...........', snare: '....o...o...', hat: 'x.o.x.o.x.o.' },
+      full: { kick: 'x.......x...', snare: '....x...x...', ride: 'x.o.x.o.x.o.' },
+      fill: { snare: '....x...xoxx' },
+      layer: { shaker: '-.-.-.-.-.-.' },
+      bassLight: [[0, 4, 0, 1], [4, 8, 7, 0.8]],
+      bassFull: [[0, 4, 0, 1], [4, 4, 7, 0.85], [8, 4, 12, 0.8]],
+    }, 1],
+  ],
+  '6/8': [
+    [{
+      name: 'rolling six',
+      light: { kick: 'x.........o.', snare: '......o.....', hat: 'x.o.o.x.o.o.' },
+      full: { kick: 'x...o.....x.', snare: '......x.....', ride: 'x.o.o.x.o.o.' },
+      fill: { snare: '......x.xoxx' },
+      layer: { shaker: '-.-.-.-.-.-.' },
+      bassLight: [[0, 6, 0, 1], [6, 6, 0, 0.85]],
+      bassFull: [[0, 4, 0, 1], [4, 2, 0, 0.7], [6, 4, 7, 0.9], [10, 2, 0, 0.75]],
+    }, 3],
+    [{
+      name: 'drifting six',
+      light: { kick: 'x...........', hat: 'o.-.-.o.-.-.' },
+      full: { kick: 'x.....x.....', snare: '......x.....', ride: 'x.-.-.x.-.-.' },
+      fill: { snare: '......o.x.xx' },
+      layer: { shaker: '-.o.o.-.o.o.' },
+      bassLight: [[0, 12, 0, 1]],
+      bassFull: [[0, 6, 0, 1], [6, 6, 7, 0.85]],
+    }, 2],
+  ],
+};
+
+export const CATHEDRAL_TIMES: Banks = {
+  '4/4': CATHEDRAL,
+  '3/4': [
+    [{
+      name: 'processional in three',
+      light: { lo: 'x...........', mid: '....o...o...' },
+      full: {
+        kick: 'x...........',
+        snare: '........x...',
+        hat: 'o.-.o.-.o.-.',
+        lo: 'x.......x...',
+        mid: '....o.......',
+      },
+      fill: { mid: '....o...oo..', hi: '..........xx' },
+      layer: { shaker: '-oo.-oo.-oo.' },
+      bassLight: [[0, 12, 0, 0.9]],
+      bassFull: [[0, 8, 0, 1], [8, 4, 0, 0.9]],
+    }, 1],
+  ],
+  '6/8': [
+    [{
+      name: 'epic six',
+      light: { lo: 'x.....o.....', mid: '....o.....o.' },
+      full: {
+        kick: 'x.....x.....',
+        snare: '......x.....',
+        hat: 'o.-.-.o.-.-.',
+        lo: 'x.....x.....',
+        mid: '....o.....o.',
+      },
+      fill: { mid: '......o.oo..', hi: '..........xx' },
+      layer: { shaker: '-.o.o.-.o.o.' },
+      bassLight: [[0, 12, 0, 0.9]],
+      bassFull: [[0, 6, 0, 1], [6, 6, 0, 0.9]],
+    }, 1],
+  ],
+};

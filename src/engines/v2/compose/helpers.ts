@@ -1,10 +1,13 @@
 // Helpers the v2 styles share: playing a melody on any instrument, choirs, solos, and the silences and
 // ringing endings that give a movement room to breathe.
 
+import { hash32, Rng } from '../rng.ts';
 import type { LeadKind, MalletKind, Note, StringKind, Vowel, WindKind } from '../types.ts';
 import type { Ctx } from './context.ts';
 import {
+  character,
   embellish,
+  inMeter,
   makeMotif,
   type Motif,
   phrase,
@@ -84,13 +87,46 @@ export function play(ctx: Ctx, voice: Voice, line: readonly Note[], gain = 1, le
   }
 }
 
-/** The movement's two motifs in its style's idiom: A, the hook, and B, its falling contrast (bridges). */
-export function motifs(ctx: Ctx): { a: Motif; b: Motif } {
-  const p = PROFILES[ctx.mv.style];
+/**
+ * The movement's motifs, in its own melodic character within its style's idiom: A, the hook (choruses); B, its
+ * falling contrast (bridges); C, the verse's own tune, calmer and lower-reaching than the hook it leads to.
+ */
+export function motifs(ctx: Ctx): { a: Motif; b: Motif; c: Motif } {
+  const p = character(ctx.mrng.fork('character'), inMeter(PROFILES[ctx.mv.style], ctx.mv.meter), ctx.mv.key.mode);
   return {
     a: makeMotif(ctx.mrng.fork('hook'), p),
     b: makeMotif(ctx.mrng.fork('hook-b'), { ...p, shapes: [['fall', 2], ['arch', 1]] }, 'short', 1),
+    c: makeMotif(ctx.mrng.fork('hook-c'), { ...p, climb: [p.climb[0] - 1, p.climb[1] - 1] }),
   };
+}
+
+/**
+ * What a movement's verses sing: the hook itself (a piece built on one theme), a tune of their own (motif C:
+ * the chorus then brings the hook as something new), or nothing (the verse is the band's). `usual` is what the
+ * style's verses did before it had a choice; a piece mostly keeps to it.
+ */
+export type VersePlan = 'hook' | 'own' | 'none';
+export function versePlan(ctx: Ctx, usual: 'hook' | 'none'): VersePlan {
+  const rng = ctx.mrng.fork('verse plan');
+  return usual === 'hook'
+    ? rng.weighted([['hook', 2], ['own', 3]] as const)
+    : rng.weighted([['none', 2], ['own', 2]] as const);
+}
+
+/**
+ * Sometimes an intro gives a glimpse of the hook: its first statement, softly, on the movement's second voice, in
+ * the intro's second half. A movement decides once.
+ */
+export function introPreview(ctx: Ctx, voice: Voice, hook: Motif, o: Omit<RealizeOpts, 'step'>): void {
+  if (ctx.role !== 'intro' || ctx.bars < 4 || !ctx.mrng.fork('preview').chance(0.3)) return;
+  const half = Math.floor(ctx.bars / 2);
+  play(
+    ctx,
+    voice,
+    phrase(ctx, hook, half, Math.min(4, ctx.bars - half), { ...o, velocity: 0.6 }, 'period', undefined, 'open'),
+    0.7,
+    false,
+  );
 }
 
 /** The phrase form a role uses in this movement: stable, so a returning chorus is recognised. */
@@ -210,16 +246,28 @@ export function span(ctx: Ctx, c0: number, c1: number, from = 0): [number, numbe
 
 /**
  * A voice for the whole movement, drawn from a pool (other than `not`): a piece keeps its singer. The same
- * pool always gives the same voice within a movement.
+ * pool always gives the same voice within a movement. A lead (no `not`) is also not the one a recent piece of
+ * the same style had, while the pool has another.
  */
 export function voiceFrom(ctx: Ctx, pool: readonly Voice[], not?: Voice): Voice {
-  const rng = ctx.mrng.fork('voice');
-  const order = [...new Set(pool)];
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = rng.int(i + 1);
-    [order[i], order[j]] = [order[j], order[i]];
+  const order = (seed: number) => {
+    const rng = new Rng(hash32(seed, 0x6d6f74)).fork('voice');
+    const out = [...new Set(pool)];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+  const taken = new Set<Voice>(not ? [not] : []);
+  if (!not) {
+    for (let m = Math.max(0, ctx.mv.index - 4); m < ctx.mv.index; m++) {
+      const mv = ctx.song.movement(m);
+      if (mv.style === ctx.mv.style) taken.add(order(mv.seed)[0]);
+    }
   }
-  return order.find((v) => v !== not) ?? order[0];
+  const mine = order(ctx.mv.seed);
+  return mine.find((v) => !taken.has(v)) ?? mine.find((v) => v !== not) ?? mine[0];
 }
 
 /**

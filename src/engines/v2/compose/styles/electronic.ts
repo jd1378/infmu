@@ -6,6 +6,7 @@ import {
   choir,
   chorusMelody,
   halves,
+  introPreview,
   motifs,
   play,
   ringOut,
@@ -15,6 +16,7 @@ import {
   solo,
   span,
   stopBefore,
+  versePlan,
   type Voice,
   voiceFrom,
 } from '../helpers.ts';
@@ -43,7 +45,8 @@ import {
 export function rise(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx);
+  const { a: hook, b: hookB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'hook');
   const shape = mrng.fork('arp').pick<ArpShape>(['hemi', 'hemi', 'updown', 'broken']);
   const g = grooveFor(ctx, RISE);
   const verseKit = { kit: { kick: 'big', snare: 'clap', sc: 0.45 }, bass: 'saw', bassGain: 0.45 } as const;
@@ -82,7 +85,7 @@ export function rise(ctx: Ctx): void {
         arp(ctx, b, shape, { v: 0.62, cut: () => 2400 });
       }
       if (ctx.returning) {
-        sing(ctx, 'brass', hook, { center: 1, lo: -3, hi: 6, transpose: -12, velocity: 0.8 }, {
+        sing(ctx, 'brass', verse === 'own' ? own : hook, { center: 1, lo: -3, hi: 6, transpose: -12, velocity: 0.8 }, {
           from: half,
           bars: half,
         });
@@ -203,6 +206,7 @@ export function pulse(ctx: Ctx): void {
       sustainedBass(ctx, 'sub', 0.36);
       arps(0, bars, () => 0.7, (x) => 600 * 2 ** (1.8 * x));
       for (let b = half; b < bars; b++) drums(ctx, b, { hat: g.light.hat ?? 'x.o.x.o.x.o.x.o.' }, kit, 0.6);
+      introPreview(ctx, second, hook, { center: 2, lo: -2, hi: 9 });
       break;
     case 'verse':
       padChords(ctx, 'wide', { cut: () => [1800, 2400], g: 0.45 });

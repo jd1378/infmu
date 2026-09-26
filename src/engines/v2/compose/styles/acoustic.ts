@@ -2,12 +2,13 @@
 
 import type { BassKind } from '../../types.ts';
 import type { Ctx } from '../context.ts';
-import { GARDEN, grooveFor, HAZE, playGroove } from '../grooves.ts';
+import { GARDEN_TIMES, grooveFor, HAZE, inTime, playGroove } from '../grooves.ts';
 import {
   breath,
   choir,
   chorusMelody,
   halves,
+  introPreview,
   motifs,
   play,
   ringOut,
@@ -15,6 +16,7 @@ import {
   solo,
   stopBefore,
   stopTime,
+  versePlan,
   type Voice,
   voiceFrom,
 } from '../helpers.ts';
@@ -30,7 +32,7 @@ import {
   pianoBar,
   type PianoFigure,
   pick,
-  strum,
+  strumBar,
   sustainedBass,
 } from '../parts.ts';
 
@@ -47,7 +49,8 @@ const COMPS: readonly (readonly (readonly [number, number])[])[] = [
 export function haze(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx);
+  const { a: hook, b: hookB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'none');
   const verseComp = mrng.fork('comp').pick(COMPS.slice(1));
   const chorusComp = mrng.fork('comp2').pick(COMPS.slice(1));
   const bassKind = mrng.fork('bass-kind').pick<BassKind>(['round', 'round', '808']);
@@ -89,6 +92,7 @@ export function haze(ctx: Ctx): void {
     case 'intro':
       for (let b = 0; b < bars; b++) keys(b, COMPS[0], 0.55);
       if (guitar && ctx.bars >= 4) { for (let b = half; b < bars; b++) pick(ctx, b, 'guitar', [0, 3, 4, 5], 2, 0.5); }
+      introPreview(ctx, second, hook, { center: 2, lo: -2, hi: 8 });
       break;
     case 'verse':
       for (let b = 0; b < bars; b++) {
@@ -96,6 +100,7 @@ export function haze(ctx: Ctx): void {
         keys(b, verseComp, 0.7);
         if (guitar && ctx.returning) pick(ctx, b, 'guitar', [0, 4, 3, 5, 4, 3], 2, 0.4);
       }
+      if (verse === 'own') sing(ctx, second, own, { center: 1, lo: -3, hi: 7, velocity: 0.85 });
       // stop-time: the band hits the downbeat together and leaves the rest of the bar empty
       if (bars >= 8 && mrng.fork('stop-time').chance(0.4)) stopTime(ctx, 7);
       break;
@@ -161,7 +166,8 @@ const OSTINATOS: readonly (readonly number[])[] = [[0, 2, 1], [0, 1, 2, 3], [0, 
 export function garden(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx);
+  const { a: hook, b: hookB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'none');
   const leads: Voice[] = ['mallet:kalimba', 'wind:flute', 'wind:hum', 'mallet:vibes', 'string:guitar', 'wind:sax'];
   const lead = voiceFrom(ctx, leads);
   const second = voiceFrom(ctx, ['mallet:kalimba', 'wind:flute', 'string:guitar', 'mallet:vibes'], lead);
@@ -169,27 +175,24 @@ export function garden(ctx: Ctx): void {
   const every = mrng.fork('ost-rate').pick([1, 2] as const);
   const strumming = mrng.fork('guitar').chance(0.5);
   const bassKind = mrng.fork('bass').pick<BassKind>(['round', '808', 'round']);
-  const g = grooveFor(ctx, GARDEN);
+  const g = grooveFor(ctx, inTime(ctx, GARDEN_TIMES));
   const band = { kit: { kick: 'soft', snare: 'rim', sc: 0.15 }, bass: bassKind, bassGain: 0.7, perc: 0.8 } as const;
 
   const marimba = (b: number, v: number) => {
     const ns = arpNotes(ctx.chordAt(b), 60);
-    for (let s = 0, j = b * 16; s < 16; s += every, j += every) {
+    for (let s = 0, j = b * ctx.spb; s < ctx.spb; s += every, j += every) {
       ctx.push({
         i: 'mallet',
         t: ctx.barAt(b, s),
         n: ns[ost[(j / every) % ost.length] % ns.length],
-        v: v * (s % 4 ? 0.75 : 1),
+        v: v * (ctx.onBeat(s) ? 1 : 0.75),
         k: 'marimba',
       });
     }
   };
   const guitar = (b: number, v: number) => {
     if (strumming) {
-      const ns = guitarVoicing(ctx.chordAt(b));
-      strum(ctx, ctx.barAt(b, 0), ns, 'guitar', v);
-      strum(ctx, ctx.barAt(b, 6), ns.slice(2), 'guitar', v * 0.7, undefined, true);
-      strum(ctx, ctx.barAt(b, 10), ns, 'guitar', v * 0.85);
+      strumBar(ctx, b, guitarVoicing(ctx.chordAt(b)), 'guitar', v);
     } else pick(ctx, b, 'guitar', [0, 3, 2, 4, 1, 3, 2, 5], 2, v);
   };
 
@@ -200,6 +203,7 @@ export function garden(ctx: Ctx): void {
         marimba(b, 0.7);
         if (b >= half) drums(ctx, b, { shaker: '-o-o-o-o-o-o-o-o' }, {}, 0.6);
       }
+      introPreview(ctx, second, hook, { center: 2, lo: -2, hi: 9 });
       break;
     case 'verse':
       padChords(ctx, 'warm', { cut: () => [1200, 1600], g: 0.45 });
@@ -208,6 +212,7 @@ export function garden(ctx: Ctx): void {
         guitar(b, 0.55);
         playGroove(ctx, g, b, band);
       }
+      if (verse === 'own') sing(ctx, second, own, { center: 1, lo: -3, hi: 8, velocity: 0.85 });
       break;
     case 'prechorus':
       padChords(ctx, 'warm', { cut: (_, i) => [1200 + 500 * i, 1800 + 600 * i], g: 0.5 });
@@ -270,7 +275,8 @@ export function garden(ctx: Ctx): void {
 export function nocturne(ctx: Ctx): void {
   const { bars, mrng } = ctx;
   const { half, last } = halves(ctx);
-  const { a: hook, b: hookB } = motifs(ctx);
+  const { a: hook, b: hookB, c: own } = motifs(ctx);
+  const verse = versePlan(ctx, 'hook');
   const figure = mrng.fork('figure').pick<PianoFigure>(['broken', 'alberti', 'rolling', 'broken', 'block']);
   const chorusFigure: PianoFigure = figure === 'block' ? 'broken' : 'rolling';
   const hum = mrng.fork('hum').chance(0.5);
@@ -288,11 +294,12 @@ export function nocturne(ctx: Ctx): void {
   switch (ctx.role) {
     case 'intro':
       lh(0, bars, figure === 'rolling' ? 'broken' : figure, 0.55);
+      introPreview(ctx, second, hook, { center: 4, lo: 0, hi: 11 });
       if (mrng.fork('intro-rest').chance(0.5)) stopBefore(ctx, 1);
       break;
     case 'verse':
       lh(0, bars, figure, 0.55);
-      sing(ctx, 'piano', hook, { center: 4, lo: 0, hi: 11, velocity: 0.8 });
+      sing(ctx, 'piano', verse === 'own' ? own : hook, { center: 4, lo: 0, hi: 11, velocity: 0.8 });
       if (ctx.returning) padChords(ctx, 'strings', { cut: () => [1800, 2400], g: 0.35 });
       breathe();
       break;

@@ -1,5 +1,5 @@
 import type { ModeName } from './theory.ts';
-import type { Role, StyleId, Transition } from './types.ts';
+import type { Meter, Role, StyleId, Transition } from './types.ts';
 
 type Weighted<T> = readonly (readonly [T, number])[];
 type Range = readonly [number, number];
@@ -9,6 +9,8 @@ export interface StyleDef {
   name: string;
   genre: string;
   bpm: Range;
+  /** The times a piece of the style may be in (see Meter): most are in four, some sway in three. */
+  meters: Weighted<Meter>;
   swing: Range;
   modes: Weighted<ModeName>;
   /**
@@ -29,6 +31,8 @@ export interface StyleDef {
   barsPerChord: 1 | 2;
   /** Chance the last chorus group lifts a key (up 1 or 2 semitones), the old pop move. */
   lift: number;
+  /** Chance a bridge goes away to the subdominant's key (and the piece comes home after it). */
+  away: number;
   next: Weighted<StyleId>;
   transitions: Weighted<Transition>;
   room: Range;
@@ -74,11 +78,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Drift',
     genre: 'ambient',
     bpm: [60, 74],
+    meters: [['4/4', 5], ['3/4', 2], ['6/8', 2]],
     swing: [0, 0],
     modes: [['lydian', 3], ['ionian', 2], ['dorian', 2], ['aeolian', 1], ['mixolydian', 1]],
     forms: [
       'intro:4 verse:8 chorus:8 break:8 verse:8? chorus:8 bridge:8 chorus:8? outro:8',
       'intro:8 verse:8 verse:8? chorus:8 solo:8 bridge:8 chorus:8 chorus:8? outro:8',
+      'intro:8 verse:8 verse:8 chorus:8 chorus:8 chorus:12? outro:8',
+      'intro:6 verse:8 verse:8 bridge:8 bridge:8? verse:8 chorus:8 outro:8',
     ],
     dynamics: [-16, 12],
     balance: [-7, -4],
@@ -86,8 +93,9 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0.3,
     barsPerChord: 2,
     lift: 0,
+    away: 0.3,
     next: [['drift', 1], ['haze', 3], ['nocturne', 3], ['cathedral', 2], ['garden', 2], ['pulse', 1]],
-    transitions: [['pause', 4], ['fade', 2], ['swell', 2]],
+    transitions: [['pause', 3], ['fade', 3], ['swell', 2]],
     room: [0.9, 0.97],
     reverb: [1.7, 2.1],
     delayBeats: [1.5, 0.75, 1],
@@ -103,11 +111,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Haze',
     genre: 'lo-fi',
     bpm: [72, 88],
+    meters: [['4/4', 1]],
     swing: [0.12, 0.26],
     modes: [['dorian', 3], ['ionian', 2], ['aeolian', 2], ['mixolydian', 1]],
     forms: [
       'intro:4 verse:8 chorus:8 verse:8 prechorus:4? chorus:8 solo:8 bridge:8? chorus:8 chorus:8? outro:4',
       'intro:4 verse:8 verse:8? chorus:8 break:4 verse:8 chorus:8 solo:8? chorus:8 outro:8',
+      'intro:4 verse:12 chorus:8 verse:12 chorus:8 solo:8? chorus:8 outro:4',
+      'intro:8 verse:8 verse:8 bridge:8 verse:8 chorus:8 solo:8 chorus:12 outro:2',
     ],
     dynamics: [-13, 8],
     balance: [-2, -3],
@@ -115,8 +126,9 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0,
     barsPerChord: 1,
     lift: 0.3,
+    away: 0.25,
     next: [['haze', 1], ['drift', 3], ['garden', 3], ['nocturne', 2], ['pulse', 2], ['acid', 1]],
-    transitions: [['pause', 4], ['fade', 2], ['stop', 2]],
+    transitions: [['pause', 3], ['fade', 3], ['stop', 2]],
     room: [0.78, 0.86],
     reverb: [1.1, 1.4],
     delayBeats: [0.75, 1.5],
@@ -132,11 +144,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Pulse',
     genre: 'synthwave',
     bpm: [96, 112],
+    meters: [['4/4', 1]],
     swing: [0, 0],
     modes: [['aeolian', 4], ['dorian', 2], ['mixolydian', 1], ['ionian', 1]],
     forms: [
       'intro:8 verse:8 prechorus:4 chorus:8 verse:8 prechorus:4 chorus:8 solo:8 bridge:8 chorus:8 chorus:8? outro:8',
       'intro:8 verse:8 chorus:8 break:8 verse:8 chorus:8 solo:8? bridge:8 chorus:8 chorus:8? outro:4',
+      'intro:4 verse:8 prechorus:4 chorus:8 bridge:8 verse:8 prechorus:4 chorus:8 solo:8? chorus:12 outro:4',
+      'intro:8 verse:8 verse:8 prechorus:4 chorus:8 break:4 chorus:8 solo:8 bridge:8? chorus:8 outro:8',
     ],
     dynamics: [-11, 10],
     balance: [-3, -3],
@@ -144,6 +159,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0.1,
     barsPerChord: 1,
     lift: 0.45,
+    away: 0.3,
     next: [['pulse', 1], ['rise', 3], ['ember', 2], ['haze', 2], ['cathedral', 2], ['acid', 1]],
     transitions: [['pause', 3], ['fade', 2], ['swell', 2], ['stop', 1]],
     room: [0.84, 0.9],
@@ -161,11 +177,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Rise',
     genre: 'trance',
     bpm: [120, 128],
+    meters: [['4/4', 1]],
     swing: [0, 0],
     modes: [['aeolian', 5], ['dorian', 1], ['phrygian', 1]],
     forms: [
       'intro:8 intro:8? verse:8 build:8 drop:8 drop:8 break:8 break:8? build:8 drop:8 drop:8 outro:8 outro:8?',
       'intro:8 verse:8 verse:8? build:4 drop:8 drop:8 break:8 bridge:8? build:8 drop:8 drop:8 outro:8',
+      'intro:8 build:8 drop:8 break:8 bridge:8? build:8 drop:8 drop:8 outro:8',
+      'intro:8 verse:8 build:4 drop:8 break:8 build:8 drop:12 outro:8',
     ],
     dynamics: [-10, 12],
     balance: [-2, -2],
@@ -173,6 +192,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0,
     barsPerChord: 1,
     lift: 0.25,
+    away: 0,
     next: [['rise', 1], ['acid', 3], ['pulse', 3], ['cathedral', 2], ['ember', 2], ['drift', 1]],
     transitions: [['swell', 3], ['pause', 2], ['stop', 2]],
     room: [0.82, 0.88],
@@ -190,11 +210,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Cathedral',
     genre: 'cinematic',
     bpm: [68, 82],
+    meters: [['4/4', 5], ['3/4', 2], ['6/8', 2]],
     swing: [0, 0],
     modes: [['aeolian', 3], ['harmonic', 2], ['dorian', 1]],
     forms: [
       'intro:4 verse:8 chorus:8 break:4 verse:8? chorus:8 bridge:8 build:4 drop:8 drop:8? outro:8',
       'intro:8 verse:8 chorus:8 bridge:8 break:4? build:4 drop:8 drop:8 outro:8',
+      'intro:8 verse:8 verse:8 build:8 chorus:8 build:4 drop:8 drop:12? outro:8',
+      'intro:6 verse:8 chorus:8 bridge:8 bridge:8? verse:8 chorus:8 drop:8 outro:6',
     ],
     dynamics: [-10, 18],
     balance: [-4, -4],
@@ -202,8 +225,9 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0,
     barsPerChord: 1,
     lift: 0.3,
+    away: 0.35,
     next: [['cathedral', 1], ['nocturne', 3], ['drift', 2], ['ember', 2], ['rise', 2]],
-    transitions: [['pause', 3], ['fade', 2], ['swell', 2]],
+    transitions: [['pause', 2], ['fade', 2], ['swell', 3]],
     room: [0.92, 0.96],
     reverb: [1.7, 2],
     delayBeats: [0.75, 1.5],
@@ -219,11 +243,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Acid',
     genre: 'acid house',
     bpm: [122, 128],
+    meters: [['4/4', 1]],
     swing: [0, 0.08],
     modes: [['aeolian', 3], ['phrygian', 2], ['dorian', 2]],
     forms: [
       'intro:8 verse:8 verse:8 build:8 drop:8 drop:8 break:8 build:4 drop:8 drop:8 drop:8? outro:8 outro:4?',
       'intro:8 intro:8? verse:8 build:4 drop:8 drop:8 solo:8 break:8 build:8 drop:8 drop:8 outro:8',
+      'intro:8 verse:8 drop:8 break:8 build:8 drop:8 drop:8 solo:8? outro:8',
+      'intro:8 intro:8? build:8 drop:8 solo:8 break:8 build:4 drop:12 outro:8',
     ],
     dynamics: [-10, 10],
     balance: [-2, -2],
@@ -231,6 +258,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0,
     barsPerChord: 2,
     lift: 0,
+    away: 0,
     next: [['acid', 1], ['rise', 3], ['pulse', 2], ['haze', 1], ['ember', 1]],
     transitions: [['stop', 2], ['pause', 2], ['swell', 1]],
     room: [0.8, 0.86],
@@ -248,11 +276,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Garden',
     genre: 'organic downtempo',
     bpm: [88, 104],
+    meters: [['4/4', 6], ['6/8', 3]],
     swing: [0.06, 0.18],
     modes: [['dorian', 3], ['mixolydian', 2], ['ionian', 2], ['lydian', 1]],
     forms: [
       'intro:8 verse:8 chorus:8 verse:8 chorus:8 solo:8 break:8? bridge:8 chorus:8 chorus:8? outro:8',
       'intro:4 verse:8 verse:8? prechorus:4 chorus:8 break:8 solo:8 chorus:8 bridge:8? chorus:8 outro:8',
+      'intro:6 verse:8 chorus:8 solo:8 verse:8 chorus:8 break:8? chorus:12 outro:4',
+      'intro:4 verse:8 verse:8 bridge:8 verse:8 chorus:8 chorus:8? outro:8',
     ],
     dynamics: [-13, 9],
     balance: [-4, -4],
@@ -260,8 +291,9 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0.2,
     barsPerChord: 1,
     lift: 0.2,
+    away: 0.3,
     next: [['garden', 1], ['haze', 3], ['drift', 3], ['nocturne', 1], ['pulse', 1]],
-    transitions: [['pause', 4], ['fade', 3]],
+    transitions: [['pause', 3], ['fade', 3], ['swell', 1]],
     room: [0.8, 0.88],
     reverb: [1.2, 1.5],
     delayBeats: [0.75, 1],
@@ -277,11 +309,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Nocturne',
     genre: 'piano',
     bpm: [60, 78],
+    meters: [['4/4', 5], ['3/4', 3], ['6/8', 2]],
     swing: [0, 0],
     modes: [['aeolian', 3], ['ionian', 2], ['dorian', 2], ['lydian', 1]],
     forms: [
       'intro:4 verse:8 verse:8? chorus:8 break:4 verse:8 bridge:8 chorus:8 chorus:8? outro:8',
       'intro:4 verse:8 chorus:8 verse:8 solo:8? chorus:8 bridge:8 chorus:8 outro:8',
+      'intro:4 verse:8 verse:8 bridge:8 bridge:8? verse:8 chorus:8 outro:6',
+      'intro:2 verse:8 chorus:8 verse:8 chorus:12 bridge:8 verse:8 chorus:8? outro:4',
     ],
     dynamics: [-16, 14],
     balance: [-9, -5],
@@ -289,8 +324,9 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0.15,
     barsPerChord: 1,
     lift: 0.35,
+    away: 0.4,
     next: [['nocturne', 1], ['drift', 3], ['cathedral', 2], ['haze', 2], ['garden', 1]],
-    transitions: [['pause', 5], ['fade', 2]],
+    transitions: [['pause', 4], ['fade', 3]],
     room: [0.88, 0.94],
     reverb: [1.5, 1.8],
     delayBeats: [1.5, 1],
@@ -306,11 +342,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     name: 'Ember',
     genre: 'post-rock',
     bpm: [96, 124],
+    meters: [['4/4', 6], ['6/8', 2], ['3/4', 1]],
     swing: [0, 0],
     modes: [['aeolian', 3], ['ionian', 2], ['lydian', 2], ['dorian', 1]],
     forms: [
       'intro:8 verse:8 verse:8 build:8 chorus:8 chorus:8 break:8 break:8? build:8 build:8? drop:8 drop:8 outro:8 outro:8?',
       'intro:8 verse:8 build:8 chorus:8 bridge:8 break:8 build:8 drop:8 drop:8 drop:8? outro:8',
+      'intro:8 verse:8 verse:8 build:8 build:8 chorus:8 drop:8 drop:8 outro:8',
+      'intro:8 verse:8 chorus:8 break:8 verse:8 build:8 drop:12 outro:6',
     ],
     dynamics: [-10, 16],
     balance: [-3, -4],
@@ -318,8 +357,9 @@ export const STYLES: Record<StyleId, StyleDef> = {
     sus2: 0.25,
     barsPerChord: 1,
     lift: 0,
+    away: 0.2,
     next: [['ember', 1], ['cathedral', 3], ['drift', 2], ['pulse', 2], ['rise', 1]],
-    transitions: [['pause', 4], ['fade', 2], ['swell', 1]],
+    transitions: [['pause', 3], ['fade', 2], ['swell', 2]],
     room: [0.86, 0.92],
     reverb: [1.5, 1.8],
     delayBeats: [0.75],
@@ -341,12 +381,26 @@ export const STYLE_IDS = Object.keys(STYLES) as StyleId[];
 export interface ProgChord {
   deg: number;
   alt?: readonly number[];
+  /** Semitones the whole chord moves: a chord borrowed from outside the mode (see ChordSpec). */
+  shift?: number;
 }
 
 const P = (...degs: (number | ProgChord)[]): ProgChord[] => degs.map((d) => (typeof d === 'number' ? { deg: d } : d));
+// in minor: the major V (harmonic minor's) and the major IV (dorian's, borrowed)
 const MAJOR_V: ProgChord = { deg: 4, alt: [0, 1] };
+const MAJOR_IV: ProgChord = { deg: 3, alt: [0, 1] };
+// in major: the minor iv, and the tonic chord a whole step and a major third down (bVII, bVI), borrowed from minor
 const MINOR_IV: ProgChord = { deg: 3, alt: [0, -1] };
+const FLAT_VII: ProgChord = { deg: 0, shift: -2 };
+const FLAT_VI: ProgChord = { deg: 0, shift: -4 };
+// secondary dominants in major: the chords that lead to V and to vi
+const V_OF_V: ProgChord = { deg: 1, alt: [0, 1] };
+const V_OF_VI: ProgChord = { deg: 2, alt: [0, 1] };
 
+/**
+ * Progressions per mode: four-chord loops, and eight-chord phrases that move somewhere and cadence (a pass of
+ * those is a whole section at a chord a bar).
+ */
 export const PROGRESSIONS: Record<ModeName, ProgChord[][]> = {
   aeolian: [
     P(0, 5, 2, 6),
@@ -360,10 +414,27 @@ export const PROGRESSIONS: Record<ModeName, ProgChord[][]> = {
     P(0, 5, 3, 6),
     P(3, 5, 6, 0),
     P(0, 4, 5, 3),
+    // Andalusian: down by step to the major V
+    P(0, 6, 5, MAJOR_V),
+    P(0, 6, MAJOR_IV, 0),
+    P(0, 5, 2, 6, 0, 5, 3, MAJOR_V),
+    // round the circle of fifths and home
+    P(0, 3, 6, 2, 5, 1, MAJOR_V, 0),
+    P(0, 2, 6, 3, 0, 5, 6, MAJOR_V),
   ],
-  dorian: [P(0, 3, 0, 3), P(0, 1, 2, 3), P(0, 6, 3, 0), P(0, 4, 3, 0), P(0, 2, 3, 0), P(0, 3, 6, 3), P(3, 2, 1, 0)],
-  phrygian: [P(0, 1, 0, 1), P(0, 1, 2, 1), P(0, 5, 6, 1), P(0, 2, 1, 0)],
-  harmonic: [P(0, 3, 4, 0), P(0, 5, 3, 4), P(0, 5, 1, 4), P(0, 3, 5, 4)],
+  dorian: [
+    P(0, 3, 0, 3),
+    P(0, 1, 2, 3),
+    P(0, 6, 3, 0),
+    P(0, 4, 3, 0),
+    P(0, 2, 3, 0),
+    P(0, 3, 6, 3),
+    P(3, 2, 1, 0),
+    P(0, 3, 0, 3, 6, 2, 3, 4),
+    P(0, 6, 5, 3, 0, 6, 3, 3),
+  ],
+  phrygian: [P(0, 1, 0, 1), P(0, 1, 2, 1), P(0, 5, 6, 1), P(0, 2, 1, 0), P(0, 1, 2, 1, 0, 6, 5, 1)],
+  harmonic: [P(0, 3, 4, 0), P(0, 5, 3, 4), P(0, 5, 1, 4), P(0, 3, 5, 4), P(0, 3, 6, 2, 5, 1, 4, 0)],
   ionian: [
     P(0, 4, 5, 3),
     P(5, 3, 0, 4),
@@ -375,7 +446,16 @@ export const PROGRESSIONS: Record<ModeName, ProgChord[][]> = {
     P(3, 2, 1, 0),
     P(0, 2, 3, MINOR_IV),
     P(0, 2, 5, 3),
+    P(0, FLAT_VII, 3, 0),
+    P(0, 3, MINOR_IV, 0),
+    // the bVI, bVII that lands home
+    P(0, 3, FLAT_VI, FLAT_VII),
+    P(0, 5, 3, 4, 0, 5, 1, 4),
+    // a bass walking down: I, V, vi, iii, IV, I, IV, V
+    P(0, 4, 5, 2, 3, 0, 3, 4),
+    P(0, V_OF_VI, 5, 3, 0, 1, V_OF_V, 4),
+    P(3, 4, 2, 5, 1, V_OF_V, 4, 4),
   ],
-  lydian: [P(0, 1, 0, 1), P(0, 1, 5, 0), P(0, 6, 1, 0), P(0, 1, 2, 1), P(0, 2, 1, 5)],
-  mixolydian: [P(0, 6, 3, 0), P(0, 4, 6, 3), P(0, 6, 0, 3), P(3, 6, 0, 0), P(0, 3, 6, 4)],
+  lydian: [P(0, 1, 0, 1), P(0, 1, 5, 0), P(0, 6, 1, 0), P(0, 1, 2, 1), P(0, 2, 1, 5), P(0, 1, 0, 1, 5, 1, 2, 0)],
+  mixolydian: [P(0, 6, 3, 0), P(0, 4, 6, 3), P(0, 6, 0, 3), P(3, 6, 0, 0), P(0, 3, 6, 4), P(0, 6, 3, 0, 0, 6, 3, 4)],
 };

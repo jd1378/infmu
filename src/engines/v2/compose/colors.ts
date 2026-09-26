@@ -5,7 +5,7 @@
 import type { StyleId } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { choir, play } from './helpers.ts';
-import { makeMotif, phrase, TEXTURE } from './melody.ts';
+import { inMeter, makeMotif, phrase, TEXTURE } from './melody.ts';
 import {
   acidLine,
   acidPattern,
@@ -17,7 +17,7 @@ import {
   percBar,
   pianoBar,
   pick,
-  strum,
+  strumBar,
 } from './parts.ts';
 
 type ColorId =
@@ -55,7 +55,7 @@ const COLORS: Record<ColorId, Color> = {
     write: (ctx, v) =>
       bars(ctx, (b) => {
         const ns = arpNotes(ctx.chordAt(b), 67);
-        [0, 2, 1, 3, 2, 4, 1, 3].forEach((i, k) =>
+        [0, 2, 1, 3, 2, 4, 1, 3].slice(0, ctx.spb / 2).forEach((i, k) =>
           ctx.push({
             i: 'mallet',
             t: ctx.barAt(b, 2 * k),
@@ -71,13 +71,13 @@ const COLORS: Record<ColorId, Color> = {
     write: (ctx, v) =>
       bars(ctx, (b) => {
         const ns = arpNotes(ctx.chordAt(b), 60);
-        for (let s = 0; s < 16; s++) {
-          const g = ctx.runBar(b) * 16 + s;
+        for (let s = 0; s < ctx.spb; s++) {
+          const g = ctx.runBar(b) * ctx.spb + s;
           ctx.push({
             i: 'mallet',
             t: ctx.barAt(b, s),
             n: ns[[0, 2, 1][g % 3]],
-            v: v * (s % 4 ? 0.65 : 0.9),
+            v: v * (ctx.onBeat(s) ? 0.9 : 0.65),
             k: 'marimba',
           });
         }
@@ -97,9 +97,7 @@ const COLORS: Record<ColorId, Color> = {
     write: (ctx, v) =>
       bars(ctx, (b) => {
         const ns = guitarVoicing(ctx.chordAt(b));
-        strum(ctx, ctx.barAt(b, 0), ns, 'guitar', v);
-        strum(ctx, ctx.barAt(b, 6), ns.slice(2), 'guitar', v * 0.7, undefined, true);
-        strum(ctx, ctx.barAt(b, 10), ns, 'guitar', v * 0.85);
+        strumBar(ctx, b, ns, 'guitar', v);
       }),
     suits: { haze: 2, ember: 1, drift: 1, pulse: 1 },
     busy: true,
@@ -112,7 +110,7 @@ const COLORS: Record<ColorId, Color> = {
     write: (ctx, v) =>
       bars(ctx, (b) => {
         const top = ctx.chordAt(b).voicing.slice(-3).map((n) => n + 12);
-        for (const s of [0, 8]) {
+        for (const s of [0, ctx.spb === 12 && ctx.mv.meter === '3/4' ? 4 : ctx.spb / 2]) {
           for (const n of top) ctx.push({ i: 'mallet', t: ctx.barAt(b, s), n, v: v * 0.6, k: 'vibes' });
         }
       }),
@@ -147,7 +145,7 @@ const COLORS: Record<ColorId, Color> = {
   },
   glock: {
     write: (ctx, v) => {
-      const m = makeMotif(ctx.mrng.fork('glock'), TEXTURE);
+      const m = makeMotif(ctx.mrng.fork('glock'), inMeter(TEXTURE, ctx.mv.meter));
       play(
         ctx,
         'bell',
@@ -164,7 +162,7 @@ const COLORS: Record<ColorId, Color> = {
   },
   hum: {
     write: (ctx, v) => {
-      const m = makeMotif(ctx.mrng.fork('hum-line'), TEXTURE);
+      const m = makeMotif(ctx.mrng.fork('hum-line'), inMeter(TEXTURE, ctx.mv.meter));
       play(
         ctx,
         'wind:hum',

@@ -33,6 +33,8 @@ export interface MovementInfo {
   style: StyleInfo;
   key: KeyInfo;
   bpm: number;
+  /** The time signature, when the engine has more than one ('3/4', '6/8'; absent means 4/4). */
+  meter?: string;
   swing: number;
   sections: SectionInfo[];
   /** Global index of the movement's first section. */

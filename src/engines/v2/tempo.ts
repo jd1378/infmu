@@ -7,10 +7,13 @@
 
 import { hash32, Rng } from './rng.ts';
 import { STYLES } from './styles.ts';
-import type { Movement, Role, SectionDef } from './types.ts';
+import { type Movement, type Role, type SectionDef, stepsPerBar } from './types.ts';
+
+/** Seconds of one bar at the movement's steady tempo. */
+export const barSeconds = (mv: Pick<Movement, 'bpm' | 'meter'>) => (stepsPerBar(mv.meter) * 15) / mv.bpm;
 
 /** What a movement's tempo curve depends on. */
-export type Paced = Pick<Movement, 'style' | 'bpm' | 'seed' | 'transition'> & {
+export type Paced = Pick<Movement, 'style' | 'bpm' | 'meter' | 'seed' | 'transition'> & {
   sections: readonly Pick<SectionDef, 'role' | 'bars' | 'energy'>[];
 };
 
@@ -79,7 +82,7 @@ export class Clock {
 
   constructor(mv: Paced, local: number) {
     const bars = mv.sections[local].bars;
-    const written = bars * (240 / mv.bpm);
+    const written = bars * barSeconds(mv);
     const n = Math.max(1, Math.ceil(bars * 16));
     const m = Array.from({ length: n + 1 }, (_, k) => tempoAt(mv, local, (k / n) * bars));
     this.step = written / n;

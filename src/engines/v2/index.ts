@@ -68,6 +68,7 @@ class Plan implements SongPlan {
         style: styleInfo(mv.style),
         key: keyInfo(mv.key),
         bpm: mv.bpm,
+        meter: mv.meter,
         swing: mv.swing,
         sections: mv.sections,
         firstSection: mv.firstSection,

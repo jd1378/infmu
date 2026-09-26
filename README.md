@@ -12,14 +12,22 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   `#seed=amber-quiet-harbor&v=2&len=long&m=3&t=42`.
 - **An endless journey.** The song is a chain of movements of about two, three to four, or five to six minutes, as the
   listener chooses. Each has a style, a key, a tempo and a form built from intros, verses, pre-choruses, choruses,
-  bridges, solos, builds, drops, breaks and outros. Keys move to close neighbours and styles to related ones. A movement
-  often ends by ringing out into a few seconds of rest, like the gap between album tracks; others hand over with a
-  reverse swell or a tape stop.
+  bridges, solos, builds, drops, breaks and outros: song forms, AABA, a theme with a contrasting middle, one long
+  crescendo. Keys move to close neighbours; styles mostly to related ones, never the same twice in a row and rarely one
+  heard in the last few pieces, and a piece avoids the tempo, chords and lead voice of recent ones in its style. A
+  movement may end by ringing out into a few seconds of rest, like the gap between album tracks, fade, hand over with a
+  reverse swell, or stop the tape.
 - **Written, not random.** Each movement invents a hook in its style's idiom (a lyrical line, a trance riff, a sparse
-  film theme) with a planned contour: one climax, the rest reached by step. Phrases are built the way themes are
+  film theme) with a planned contour: one climax, the rest reached by step, and a character of its own (busy or
+  spacious, stepping or leaping, entering on the beat or just after it, sometimes pentatonic). Its verses may sing the
+  hook, a tune of their own or nothing, and its intro may give a glimpse of the hook. Some pieces sway in three, as
+  waltzes or in 6/8, with grooves, piano figures and tunes written for it. Phrases are built the way themes are
   (question and answer, sentence, AABA, rising sequence), each statement continuing from the last, and every chorus
-  restates the hook. Sections end on the chord that leads into the next one, last choruses sometimes lift a key, and
-  silences are written in: stop-time bars, a held breath before a chorus, a dead-silent beat before a drop.
+  restates the hook (a long last chorus sings its last line again). The harmony runs from four-chord loops to
+  eight-chord phrases that travel and cadence, with borrowed chords and secondary dominants; a bridge sometimes moves to
+  the key a fourth up and comes home, sections end on the chord that leads into the next one, last choruses sometimes
+  lift a key, and silences are written in: stop-time bars, a held breath before a chorus, a dead-silent beat before a
+  drop.
 - **Grooves with a feel.** Each style has a bank of grooves written the way a producer programs them (drums and a bass
   line that locks with the kick, with verse, chorus and fill bars); a movement draws one and keeps it, and two pieces of
   a style in a row never share one.
