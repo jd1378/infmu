@@ -191,15 +191,17 @@ export type Ev =
   | { i: 'stop'; t: number; d: number }
   /**
    * A plucked note. The fretting hand's techniques: `slur`, hammered on or pulled off from the note before
-   * rather than picked; `slide`, slid into from this many semitones away; `squeak`, how loud the hand squeaks
+   * rather than picked (with a `slide`, slid to from it along the still ringing string); `slide`, slid or bent into
+   * from this many semitones away, over `glide` seconds (absent, a quick slide along the frets: 0.04 s and 0.03 s
+   * more a semitone; a bend or a bottleneck takes longer); `squeak`, how loud the hand squeaks
    * along a wound string as it shifts to the note (0 to 1); `swell`, seconds a note takes to swell in with no
    * attack at all (a volume pedal, an EBow).
    *
    * `vib`: how wide the fretting finger's vibrato is on a note held for `d` seconds, as a multiple of the player's
    * usual (on an electric a sine of about ±22 cents, ±13 on the acoustic `guitar`, varying note to note; never on the
-   * harp; it comes in 0.1 to 0.3 s after the pick, at 4.5 to 5.9 Hz, and widens as the note is held): 0 for none, 1
-   * the usual, 2 wide. Absent, a held note of a line (`lead` set, true or false, `d` at least 0.35 s, not a `swell`)
-   * gets 1, and a chord's or an arpeggio's note (no `lead`) none.
+   * harp; it comes in 0.1 to 0.3 s after the pick, at 4.5 to 5.9 Hz or about `vibRate`, and widens as the note is
+   * held): 0 for none, 1 the usual, 2 wide. Absent, a held note of a line (`lead` set, true or false, `d` at least
+   * `VIB_HELD` s, not a `swell`) gets 1, and a chord's or an arpeggio's note (no `lead`) none.
    * `feedback`: on a held `overdrive` note, how loud the amp's feedback blooms: one of the string's harmonics (between
    * 320 and 900 Hz) swells in over one to two seconds from about half a second after the pick and sings over the
    * chord until the note stops (0 none, 1 the usual, 2 it takes the note over). Absent, the first note of 2 s or more
@@ -216,9 +218,11 @@ export type Ev =
     lead?: boolean;
     slur?: boolean;
     slide?: number;
+    glide?: number;
     squeak?: number;
     swell?: number;
     vib?: number;
+    vibRate?: number;
     feedback?: number;
   }
   | { i: 'mallet'; t: number; n: number; v: number; k: MalletKind; p?: number; lead?: boolean }
@@ -232,6 +236,9 @@ export type Ev =
   | { i: 'gap'; t: number; d: number; room: boolean };
 
 export const isMelody = (e: Ev): boolean => 'lead' in e && e.lead === true;
+
+/** A plucked note held this long (s) in a line is sung: the fretting finger's vibrato comes in. */
+export const VIB_HELD = 0.35;
 
 export type Instrument = Ev['i'];
 

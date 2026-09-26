@@ -11,8 +11,9 @@
 
 import type { Rng } from '../rng.ts';
 import { MODES, pc } from '../theory.ts';
-import { type Ev, isMelody, type Note, type StyleId, TAKES } from '../types.ts';
+import { type Ev, isMelody, type Note, type StyleId, TAKES, VIB_HELD } from '../types.ts';
 import type { Ctx } from './context.ts';
+import { ANYONE, guitarist } from './guitarist.ts';
 
 /** How a part is played: how far its player drifts (s), their jitter (s), how much their dynamics move. */
 interface Touch {
@@ -371,12 +372,17 @@ function hammers(ctx: Ctx): void {
 
 /**
  * A guitarist's fretting hand. A note a step from the one before and joined to it is hammered on or pulled
- * off, not picked (always after a grace note); a longer note reached by a leap is sometimes slid into from a
- * fret or two away; on an acoustic's wound strings a shift of the hand squeaks now and then, in a line and
- * between the chords of a strummed part.
+ * off, not picked (always after a grace note, unless the hand wears a slide); a held note joined to the one
+ * before may be slid to from it along the ringing string; a held note on an electric may be picked on the scale's
+ * note below and bent up to; a held note reached by a leap is sometimes slid into from a fret or two away; on an acoustic's wound
+ * strings a shift of the hand squeaks now and then, in a line and between the chords of a strummed part. The
+ * tune is the lead guitarist's, played their way (see guitarist.ts): how often they do each, how they shake a
+ * held note, where they sit against the beat.
  */
 function fretwork(ctx: Ctx): void {
   const rng = ctx.rng.fork('fretwork');
+  const lead = guitarist(ctx).hands;
+  const scale = MODES[ctx.key.mode].map((x) => (x + ctx.key.tonic) % 12);
   type Str = Extract<Ev, { i: 'string' }>;
   const strings = ctx.events.filter((e): e is Str => e.i === 'string' && e.k !== 'harp').sort((a, b) => a.t - b.t);
   const lines = new Map<string, Str[]>();
@@ -397,6 +403,10 @@ function fretwork(ctx: Ctx): void {
       }
       continue;
     }
+    const melody = part.endsWith(':melody');
+    const h = melody ? lead : ANYONE;
+    // a slide's time along the frets, as the synth's quick one, times the player's
+    const glide = (semitones: number) => h.glide * (0.04 + 0.03 * semitones);
     for (let k = 1; k < notes.length; k++) {
       const a = notes[k - 1];
       const b = notes[k];
@@ -404,13 +414,35 @@ function fretwork(ctx: Ctx): void {
       const end = a.t + (a.d ?? ctx.beat);
       const joined = end > b.t - 0.03 && b.t - a.t <= ctx.beat * 1.01;
       const grace = (a.d ?? ctx.beat) <= 0.09;
-      if (iv >= 1 && iv <= 2 && joined && (grace || rng.chance(0.5))) {
+      const held = (b.d ?? 0) >= ctx.beat;
+      // a player who slides to the next note holds this one on until they do
+      const close = b.t - end < Math.min(0.3, ctx.beat / 2) && b.t - a.t <= 2 * ctx.beat;
+      if (iv >= 1 && iv <= 2 && joined && ((grace && h.slur > 0) || rng.chance(h.slur))) {
         b.slur = true;
         a.d = b.t - a.t;
-      } else if (iv >= 3 && (b.d ?? 0) >= ctx.beat && rng.chance(0.3)) {
+      } else if (iv >= 1 && iv <= 7 && close && held && rng.chance(h.legato)) {
+        b.slur = true;
+        b.slide = a.n - b.n;
+        b.glide = glide(iv);
+        a.d = b.t - a.t;
+      } else if (b.k !== 'guitar' && held && rng.chance(h.bend)) {
+        // picked on the scale's note below and pushed up to it: slower than a finger slides
+        const up = scale.includes(pc(b.n - 1)) ? 1 : 2;
+        b.slide = -up;
+        b.glide = 0.12 + 0.06 * up;
+      } else if (iv >= 3 && held && rng.chance(h.slide)) {
         b.slide = (b.n > a.n ? -1 : 1) * rng.pick([1, 2]);
+        if (h.glide !== 1) b.glide = glide(Math.abs(b.slide));
       }
       if (b.k === 'guitar' && iv >= 5 && b.t - end > 0.08 && rng.chance(0.3)) b.squeak = rng.range(0.3, 0.7);
+    }
+    if (!melody) continue;
+    for (const e of notes) {
+      e.t = Math.max(0, e.t + h.lag);
+      if (e.vib === undefined && !e.swell && (e.d ?? 0) >= VIB_HELD) {
+        e.vib = h.vib;
+        e.vibRate = h.rate;
+      }
     }
   }
 }

@@ -282,3 +282,24 @@ Deno.test('fingers scuff the strings when a line jumps to another string, not on
   const step = extra(line(62));
   assert(jump > 0 && step === 0, `a jump scuffs (${db(jump).toFixed(1)} dB), a step doesn't`);
 });
+
+Deno.test("a note slid or bent into rises over its glide; a player's vibrato keeps their rate", () => {
+  const sr = 24000;
+  const mean = (track: [number, number][], t0: number, t1: number) => {
+    const seg = track.filter(([t]) => t >= t0 && t <= t1);
+    return seg.reduce((s, [, c]) => s + c, 0) / seg.length;
+  };
+  const from = (glide?: number) =>
+    pitch(guitar({ n: 64, v: 0.8, k: 'clean', d: 1, lead: true, vib: 0, slide: -2, glide }, sr, 1.2), sr, hz(64));
+  // (the note starts at 0.05 s) a quick slide along the frets is there by a tenth of a second, a bend still rising
+  const fret = mean(from(), 0.2, 0.25);
+  const bend = mean(from(0.3), 0.2, 0.25);
+  assert(Math.abs(fret) < 15, `the slide is at ${fret.toFixed(0)} c`);
+  assert(bend < -40, `the bend is at ${bend.toFixed(0)} c`);
+  assert(Math.abs(mean(from(0.3), 0.5, 0.9)) < 15, 'the bend arrives');
+  const rate = (vibRate: number) =>
+    vibrato(pitch(guitar({ n: 64, v: 0.8, k: 'clean', d: 2.4, lead: true, vibRate }, sr, 2.6), sr, hz(64)), 0.9, 2.3)
+      .rate;
+  const [slow, quick] = [rate(4.4), rate(6.3)];
+  assert(Math.abs(slow - 4.4) < 0.8 && Math.abs(quick - 6.3) < 0.8, `${slow.toFixed(2)} and ${quick.toFixed(2)} Hz`);
+});

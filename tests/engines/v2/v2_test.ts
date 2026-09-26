@@ -1,6 +1,7 @@
 import { assert, assertAlmostEquals, assertEquals, assertNotEquals } from '@std/assert';
 import { composeSection, letGo } from '../../../src/engines/v2/compose/index.ts';
 import { Ctx, sectionChords, sectionKey } from '../../../src/engines/v2/compose/context.ts';
+import { guitarist, PLAYERS } from '../../../src/engines/v2/compose/guitarist.ts';
 import { perform } from '../../../src/engines/v2/compose/perform.ts';
 import { barSeconds, Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
@@ -967,4 +968,45 @@ Deno.test('a band stops as players do: held sounds are let go, ringing ones ring
       assert(!s.events.some((e) => e.i === 'gap' && e.t + e.d < s.duration - 0.01), `${style} cuts dead`);
     }
   }
+});
+
+Deno.test("each piece has its own lead guitarist: their vibrato, slides and bends, and their guitar's tuning", () => {
+  type Str = Extract<Ev, { i: 'string' }>;
+  const who = new Set<string>();
+  let sung = 0;
+  for (const style of ['ember', 'haze'] as const) {
+    for (let k = 0; k < 12; k++) {
+      const song = new Song(`hands-${style}-${k}`, [style]);
+      const mv = song.movement(0);
+      const g = guitarist(new Ctx(song, mv.firstSection));
+      who.add(g.who);
+      const sections = mv.sections.map((_, i) => composeSection(song, mv.firstSection + i));
+      const tune = sections.flatMap((s) => s.events.filter((e): e is Str => e.i === 'string' && e.lead === true));
+      // one pair of hands all piece long
+      assert(tune.every((e) => e.vibRate === undefined || e.vibRate === g.hands.rate), `${g.who} changed hands`);
+      if (tune.some((e) => e.vibRate === g.hands.rate)) sung++;
+      // a picked note given its own glide is bent into (a fret player's slides take the usual time)
+      const bent = g.hands.glide === 1 ? tune.filter((e) => !e.slur && e.glide !== undefined) : [];
+      if (!g.hands.bend) assertEquals(bent.length, 0, `${g.who} bent a string`);
+      assert(bent.every((e) => e.k !== 'guitar'), 'bent an acoustic');
+      if (!g.hands.slur) assert(!tune.some((e) => e.slur && !e.slide), `${g.who} hammered on`);
+      if (!g.hands.legato) assert(!tune.some((e) => e.slur && e.slide), `${g.who} slid from note to note`);
+      if (style !== 'ember') continue;
+      // the open strings of the tuning ring in every chord swelled in
+      const open = g.open.map((x) => (mv.key.tonic + x) % 12);
+      sections.forEach((s, i) => {
+        const tonic = sectionKey(mv, i).tonic;
+        const ring = g.open.map((x) => (tonic + x) % 12);
+        const swells = s.events.filter((e): e is Str => e.i === 'string' && e.swell !== undefined);
+        for (const c of s.chords) {
+          const pcs = swells.filter((e) => e.t > c.t - 0.1 && e.t < c.t + 0.4).map((e) => pc(e.n));
+          if (!pcs.length) continue;
+          assert(ring.every((p) => pcs.includes(p)), `${open}: open strings missing from ${pcs}`);
+        }
+      });
+    }
+  }
+  assert(who.size >= 5, `only ${[...who]} played`);
+  assert(sung >= 12, `the lead guitarist shook their held notes their way in ${sung} pieces`);
+  assertEquals(Object.keys(PLAYERS).length, 6);
 });

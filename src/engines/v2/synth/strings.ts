@@ -22,7 +22,7 @@
 // The overdriven guitar is summed dry on the amp bus, so a chord distorts as a whole the way it does through a
 // real amp.
 
-import type { Ev, StringKind } from '../types.ts';
+import { type Ev, type StringKind, VIB_HELD } from '../types.ts';
 import type { Bus } from './bus.ts';
 import { hash32 } from '../rng.ts';
 import { Chain, Chorus, Noise, Oversampled, type Section, smooth, softClip, SVF } from './dsp.ts';
@@ -320,8 +320,10 @@ function excitation(
   const w = Math.max(1, Math.round(beta * N));
   const shape = new Float32Array(N);
   for (let i = 0; i < N; i++) shape[i] = (i < w ? 1 - w / N : -w / N) + 0.04 * b.noise.next();
-  // a hammer-on or pull-off sets the string going without a pick: a softer, rounder push
-  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** ((m.excVel ?? 4) * (e.v - 0.7)) * (e.slur ? 0.3 : 1), sr);
+  // a hammer-on or pull-off sets the string going without a pick: a softer, rounder push; a slide carries on what
+  // the string still had
+  const legato = e.slur ? (e.slide ? 0.5 : 0.3) : 1;
+  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** ((m.excVel ?? 4) * (e.v - 0.7)) * legato, sr);
   let mean = 0;
   for (let i = 0; i < N; i++) mean += shape[i];
   mean /= N;
@@ -403,7 +405,7 @@ export function string(b: Bus, e: E<'string'>): void {
   const fb = f * 2 ** (((1 - share) * cents) / 1200);
   // a slide: from `slide` semitones away onto the note, fast in the middle, settling at the fret
   const slide = e.slide ?? 0;
-  const glide = 0.04 + 0.03 * Math.abs(slide);
+  const glide = e.glide ?? 0.04 + 0.03 * Math.abs(slide);
   const vib = vibrato(e, d, m, rnd);
   let lastT = -1;
   let lastBend = 1;
@@ -464,14 +466,11 @@ export function string(b: Bus, e: E<'string'>): void {
   } else b.voice(e.t, len, (j, t) => tick(j, t) * g, p, rv, dl, 0.3);
 }
 
-/** Notes held this long (s) in a line get the fretting finger's vibrato unless the note says otherwise. */
-const VIB_HELD = 0.35;
-
 /**
  * The fretting finger's vibrato on a held note: rocking the string along the fret after the attack, as players do on
  * a note they sing. It comes in 0.12 to 0.27 s after the pick, over a quarter to half a second, and keeps widening a
- * little as the note is held (by a quarter over the next two seconds); each note has its own rate (4.5 to 5.9 Hz,
- * wandering 4% around it) and width (0.75 to 1.25 of the player's, wider on longer and harder notes). Ten clear
+ * little as the note is held (by a quarter over the next two seconds); each note has its own rate (4.5 to 5.9 Hz, or
+ * within 6% of the player's own `vibRate`, wandering 4% around it) and width (0.75 to 1.25 of the player's, wider on longer and harder notes). Ten clear
  * vibratos on recorded clean leads: 5.0 Hz (4.4 to 5.3), 23 cents (15 to 30). A line's held notes get it unless `vib`
  * is 0; a chord's or an arpeggio's only when `vib` asks for it; a note with no `d` never (it rings on, the hand gone).
  * Returns the pitch as a ratio at t seconds, and the lowest it goes.
@@ -486,7 +485,7 @@ function vibrato(
   if (!scale || !m.vib || !Number.isFinite(d)) return null;
   const width = m.vib * scale * (0.75 + 0.5 * rnd.unit()) * (0.8 + 0.4 * Math.min(1, e.v)) *
     (0.7 + 0.3 * Math.min(1, Math.max(0, d - VIB_HELD) / 1.5));
-  const rate = 4.5 + 1.4 * rnd.unit();
+  const rate = e.vibRate ? e.vibRate * (0.94 + 0.12 * rnd.unit()) : 4.5 + 1.4 * rnd.unit();
   const delay = 0.12 + 0.15 * rnd.unit();
   const rise = 0.25 + 0.2 * rnd.unit();
   const wob = 2 * Math.PI * rnd.unit();

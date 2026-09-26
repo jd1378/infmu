@@ -1,7 +1,7 @@
 // Drift (ambient), Cathedral (cinematic) and Ember (post-rock).
 
 import type { BassKind } from '../../types.ts';
-import type { Ctx } from '../context.ts';
+import type { ChordSlot, Ctx } from '../context.ts';
 import { CATHEDRAL_TIMES, DRIFT_TIMES, EMBER_TIMES, grooveBar, grooveFor, inTime, playGroove } from '../grooves.ts';
 import {
   choir,
@@ -43,6 +43,7 @@ import {
   tomRoll,
   tremolo,
 } from '../parts.ts';
+import { guitarist } from '../guitarist.ts';
 import { phrase } from '../melody.ts';
 
 // ------------------------------------------------------------------ drift: ambient
@@ -321,13 +322,16 @@ export function ember(ctx: Ctx): void {
   } as const;
   const x = (b: number) => ctx.runAt(b / bars);
   const swellRng = ctx.rng.fork('swells');
+  // the lead guitarist's tuning rings in every guitar's chords; their tremolo picking is theirs
+  const { hands, open } = guitarist(ctx);
+  const drone = (slot: ChordSlot) => droneVoicing(ctx, slot, open);
 
   // chords swelled in on the clean guitar, one swell a chord, ringing on into the delay: the drone voicing's upper
   // notes, so the open strings on top never change
   const swells = (v: number, from = 0, to = bars) => {
     for (const slot of ctx.chords) {
       if (slot.bar < from || slot.bar >= to) continue;
-      droneVoicing(ctx, slot).slice(1).forEach((n, k) =>
+      drone(slot).slice(1).forEach((n, k) =>
         ctx.push({
           i: 'string',
           t: ctx.barAt(slot.bar) + 0.04 * k,
@@ -350,12 +354,12 @@ export function ember(ctx: Ctx): void {
   const denseFigure = figures.pick([[0, 2, 3, 4, 3, 2], [0, 3, 2, 4, 3, 2], [0, 2, 4, 3, 2, 3]]);
   const droneFigure = figures.pick([[2, 1, 0, 1], [2, 0, 1, 0]]);
   const shimmer = (b: number, v: number, dense = false) => {
-    const ns = droneVoicing(ctx, ctx.chordAt(b));
+    const ns = drone(ctx.chordAt(b));
     if (dense) pickNotes(ctx, b, 'clean', ns, denseFigure, 2, v, -0.4);
     else pickNotes(ctx, b, 'clean', ns, quietFigure, 4, v, -0.4);
   };
   const interlock = (b: number, v: number) => {
-    const top = droneVoicing(ctx, ctx.chordAt(b)).slice(-3);
+    const top = drone(ctx.chordAt(b)).slice(-3);
     pickNotes(ctx, b, 'clean', top, droneFigure, ctx.mv.meter === '4/4' ? 6 : 4, v, 0.45);
   };
   // the wall: power chords held through each chord, a guitarist each side
@@ -406,7 +410,7 @@ export function ember(ctx: Ctx): void {
     const long = ns.filter((n) => n.d >= ctx.bar);
     const short = ns.filter((n) => n.d < ctx.bar);
     // picked softly: a tremolo is a shimmer inside the wall, not a row of hard attacks on top of it
-    tremolo(ctx, long, 'clean', v * 0.65, { lead: true });
+    tremolo(ctx, long, 'clean', v * 0.65, { lead: true, fast: hands.fast });
     play(ctx, 'string:clean', short, v * 0.75);
     const up = ns.map((n) => ({ ...n, n: n.n + 12 }));
     if (ctx.finalTurn) tremolo(ctx, up, 'clean', v * 0.3, { p: 0.3 });
@@ -453,7 +457,7 @@ export function ember(ctx: Ctx): void {
         // one chord tone a chord, higher in the chord as the run goes on, so the line climbs with the crescendo
         const climb = ctx.chords.filter((c) => c.bar + c.bars > half).map((c) => {
           const at = Math.max(half, c.bar);
-          const ns = droneVoicing(ctx, c).slice(1);
+          const ns = drone(c).slice(1);
           const n = ns[Math.min(ns.length - 1, Math.floor(Math.max(0, 2 * x(at) - 1) * ns.length))];
           return { t: ctx.barAt(at), d: (c.bar + c.bars - at) * ctx.bar, n, v: 0.8 };
         });

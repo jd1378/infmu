@@ -398,17 +398,17 @@ export function guitarVoicing(slot: ChordSlot, low = 40): number[] {
 }
 
 /**
- * A post-rock chord shape: the chord's root and fifth low, its third above them, and on top the key's tonic and
- * fifth, left ringing like open strings whatever the chord. The drone turns every chord into a shimmering add9 or
- * sus, and holds the piece together while the bass moves.
+ * A post-rock chord shape: the chord's root and fifth low, its third above them, and on top the open strings of the
+ * tuning (`open`, semitones above the key's tonic: its tonic and fifth unless told), left ringing whatever the chord.
+ * The drone turns every chord into a shimmering add9 or sus, and holds the piece together while the bass moves.
  */
-export function droneVoicing(ctx: Ctx, slot: ChordSlot, low = 45): number[] {
+export function droneVoicing(ctx: Ctx, slot: ChordSlot, open: readonly number[] = [0, 7], low = 45): number[] {
   const root = low + mod(slot.pcs[0] - low, 12);
   const above = (from: number, p: number) => from + 1 + mod(p - (from + 1), 12);
   const fifth = above(root, slot.pcs[2] ?? slot.pcs[1]);
   const third = above(fifth, slot.pcs[1]);
   const tonic = 59 + mod(ctx.key.tonic - 59, 12);
-  const drones = [tonic, above(tonic, (ctx.key.tonic + 7) % 12)];
+  const drones = open.map((x) => tonic + x);
   return [...new Set([root, fifth, third, ...drones])].sort((a, b) => a - b);
 }
 
