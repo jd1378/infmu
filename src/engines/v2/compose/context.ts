@@ -1,9 +1,10 @@
 // Everything a part writer needs to know about the section it's writing: time grid (with swing), the chord
 // under any bar, voice-led chord voicings, and the degree <-> pitch mapping that respects altered chords.
 
+import { MOODS } from '../moods.ts';
 import { barSeconds, type Song } from '../plan.ts';
 import { hash32, Rng } from '../rng.ts';
-import { STYLES } from '../styles.ts';
+import { OPEN_ENDS, STYLES } from '../styles.ts';
 import {
   chordName,
   chordPitchClasses,
@@ -104,6 +105,8 @@ export class Ctx {
   readonly tonicLow: number;
   /** The note the kick settles on: the tonic or the fifth, whichever sits between E1 and B1. */
   readonly kickNote: number;
+  /** Scale degrees every tune sits above (or below) where the style writes it: the mood's register. */
+  readonly register: number;
 
   constructor(song: Song, index: number) {
     const ref = song.section(index);
@@ -113,6 +116,7 @@ export class Ctx {
     this.index = index;
     this.sec = this.mv.sections[this.local];
     this.role = this.sec.role;
+    this.register = MOODS[this.mv.mood].register;
     this.key = sectionKey(this.mv, this.local);
     this.beat = 60 / this.mv.bpm;
     this.bar = barSeconds(this.mv);
@@ -141,7 +145,8 @@ export class Ctx {
     this.inRun = this.local - first;
     this.runEnd = this.local === end;
     this.turn = secs.slice(0, first).filter((s, k) => s.role === this.sec.role && secs[k + 1].role !== s.role).length;
-    this.finalTurn = !secs.slice(end + 1).some((s) => s.role === this.sec.role);
+    // the last full turn: a hushed or bare return later (an afterglow) is not where the part peaks
+    this.finalTurn = !this.sec.treatment && !secs.slice(end + 1).some((s) => s.role === this.sec.role && !s.treatment);
     this.tonicMid = tonicNear(this.key, 72);
     this.tonicLow = tonicNear(this.key, 40);
     this.kickNote = [0, 7].map((iv) => 28 + mod(this.key.tonic + iv - 4, 12)).find((n) => n <= 35) ?? 33;
@@ -221,6 +226,11 @@ export class Ctx {
     return this.tonicLow + mod(slot.pcs[0] - this.key.tonic, 12);
   }
 
+  /** Bass-register note the bass plays under a chord: its root, or the bass it asks for (a slash chord, a pedal). */
+  bass(slot: ChordSlot): number {
+    return slot.spec.bass === undefined ? this.root(slot) : this.tonicLow + mod(slot.spec.bass, 12);
+  }
+
   /** Degree -> MIDI in the melody register, bent onto an altered chord tone when the chord asks for it. */
   pitch(degree: number, slot: ChordSlot, tonic = this.tonicMid): number {
     const m = degreeToMidi(this.key, degree, tonic);
@@ -285,6 +295,7 @@ export class Ctx {
       d: c.bars * this.bar,
       name: chordName(this.key, c.spec),
       pcs: c.pcs,
+      bass: c.spec.bass === undefined ? c.pcs[0] : mod(this.key.tonic + c.spec.bass, 12),
     }));
   }
 
@@ -361,6 +372,8 @@ export function sectionChords(mv: Movement, local: number): ChordSlot[] {
   const prog = progression(mv, sec.role);
   const key = sectionKey(mv, local);
   const leading = sec.role === 'build' || sec.role === 'prechorus';
+  // a pedal: the bass holds the tonic under the chords, the fifth under a build; a bridge lets go of it
+  const pedal = mv.harmony === 'pedal' && sec.role !== 'bridge' ? (leading ? 7 : 0) : undefined;
   // the movement's last sounding bars come home to the tonic (a rest after them is silence)
   let lastSounding = mv.sections.length - 1;
   if (mv.sections[lastSounding].role === 'rest') lastSounding--;
@@ -368,7 +381,10 @@ export function sectionChords(mv: Movement, local: number): ChordSlot[] {
   const step = leading ? Math.max(1, sec.bars / prog.length) : sec.role === 'rest' ? sec.bars : per;
   for (let bar = 0, k = 0; bar < sec.bars; bar += step, k++) {
     let spec = prog[k % prog.length];
-    if (local === lastSounding && bar + step >= sec.bars) spec = { deg: 0, size: spec.size };
+    // (or, ending open, on the mode's plagal or deceptive colour)
+    if (local === lastSounding && bar + step >= sec.bars) {
+      spec = mv.ending === 'open' ? { ...OPEN_ENDS[mv.key.mode], size: spec.size } : { deg: 0, size: spec.size };
+    }
     slots.push({
       bar,
       bars: Math.min(step, sec.bars - bar),
@@ -383,5 +399,6 @@ export function sectionChords(mv: Movement, local: number): ChordSlot[] {
     last.spec = turn;
     last.pcs = chordPitchClasses(key, turn);
   }
+  if (pedal !== undefined) { for (const s of slots) s.spec = { ...s.spec, bass: pedal }; }
   return slots;
 }

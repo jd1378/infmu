@@ -167,7 +167,10 @@ export function rise(ctx: Ctx): void {
         play(ctx, 'bell', [{ t: ctx.barAt(last), d: 1, n: ctx.tonicMid + 12, v: 1 }], 0.9, false);
       }
   }
-  if ((ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') && ctx.role !== 'build') cymbalInto(ctx);
+  // (a rest before the next piece stays silent, even into one that opens cold)
+  if ((ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') && ctx.role !== 'build' && ctx.role !== 'rest') {
+    cymbalInto(ctx);
+  }
   ringOut(ctx);
 }
 
@@ -281,7 +284,7 @@ export function pulse(ctx: Ctx): void {
       }
       sustainedBass(ctx, 'sub', 0.34, half, bars, 2);
   }
-  if (ctx.nextRole === 'chorus' && ctx.role !== 'prechorus') cymbalInto(ctx);
+  if (ctx.nextRole === 'chorus' && ctx.role !== 'prechorus' && ctx.role !== 'rest') cymbalInto(ctx);
   ringOut(ctx);
 }
 

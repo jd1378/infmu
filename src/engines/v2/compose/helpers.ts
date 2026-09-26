@@ -15,6 +15,7 @@ import {
   type PhraseForm,
   PROFILES,
   type RealizeOpts,
+  tuned,
 } from './melody.ts';
 
 /** Anything that can carry a melody. */
@@ -93,7 +94,8 @@ export function play(ctx: Ctx, voice: Voice, line: readonly Note[], gain = 1, le
  * falling contrast (bridges); C, the verse's own tune, calmer and lower-reaching than the hook it leads to.
  */
 export function motifs(ctx: Ctx): { a: Motif; b: Motif; c: Motif } {
-  const p = character(ctx.mrng.fork('character'), inMeter(PROFILES[ctx.mv.style], ctx.mv.meter), ctx.mv.key.mode);
+  const idiom = tuned(inMeter(PROFILES[ctx.mv.style], ctx.mv.meter), ctx.mv.tune);
+  const p = character(ctx.mrng.fork('character'), idiom, ctx.mv.key.mode);
   return {
     a: makeMotif(ctx.mrng.fork('hook'), p),
     b: makeMotif(ctx.mrng.fork('hook-b'), { ...p, shapes: [['fall', 2], ['arch', 1]] }, 'short', 1),

@@ -65,6 +65,12 @@ const PLAY: { [K in Ev['i']]?: (b: Bus, e: E<K>) => void } = {
   acid,
 };
 
+/**
+ * LU the rhythm section moves against the bed at a section's energy (the bass half as much): under the style's
+ * balance in its quiet parts, over it at the peak, so a build is heard growing, not only the whole getting louder.
+ */
+export const balanceLift = (energy: number) => Math.max(-3, Math.min(2, (energy - 0.7) * 6));
+
 /** How far the melody sits under the band: nearly level with it in the loudest parts. */
 export const melodyOffset = (energy: number) => -5 + 3 * energy;
 
@@ -91,8 +97,10 @@ export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendere
   playAll(b, of('fx'), mix.amp);
   const against = (ref: number, offset: number, lo: number, hi: number) => (own: number) =>
     Number.isFinite(ref) && Number.isFinite(own) ? Math.min(hi, Math.max(lo, 10 ** ((ref + offset - own) / 20))) : 1;
-  stem(b, score, of('drums'), 0x1b873593, against(bed, mix.drums, 0.25, 2), mix.bus === 'rock' ? drumBus : undefined);
-  stem(b, score, of('bass'), 0x85ebca6b, against(bed, mix.bass, 0.25, 2));
+  const grow = balanceLift(score.section.energy);
+  const drums = against(bed, mix.drums + grow, 0.25, 2);
+  stem(b, score, of('drums'), 0x1b873593, drums, mix.bus === 'rock' ? drumBus : undefined);
+  stem(b, score, of('bass'), 0x85ebca6b, against(bed, mix.bass + grow / 2, 0.25, 2));
   // measured once the rest of the band is in
   stem(
     b,

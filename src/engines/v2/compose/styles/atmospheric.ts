@@ -30,6 +30,7 @@ import {
   droneVoicing,
   drums,
   EIGHTHS,
+  moves,
   organChords,
   padChords,
   pianoBar,
@@ -161,6 +162,7 @@ export function cathedral(ctx: Ctx): void {
     const r = ctx.root(ctx.chordAt(b));
     const root = r < 40 ? r + 12 : r;
     for (let s = 0; s < ctx.spb; s += 2) {
+      if (!moves(ctx, s)) continue;
       for (const n of [root, root + 7, root + 12]) {
         ctx.push({
           i: 'string',
@@ -228,6 +230,7 @@ export function cathedral(ctx: Ctx): void {
       // the arp climbs a rung every beat, from the bass register to the top of the piano
       const total = bars * ctx.spb;
       for (let s = 0; s < total; s++) {
+        if (!moves(ctx, s % ctx.spb)) continue;
         const slot = ctx.chordAtStep(s);
         const lad = [...arpNotes(slot, 55), ...arpNotes(slot, 67).slice(1), ...arpNotes(slot, 79).slice(1)];
         const x = s / total;

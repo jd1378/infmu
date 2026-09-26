@@ -27,6 +27,7 @@ import {
   comp,
   drums,
   guitarVoicing,
+  moves,
   padChords,
   percBar,
   pianoBar,
@@ -182,6 +183,7 @@ export function garden(ctx: Ctx): void {
   const marimba = (b: number, v: number) => {
     const ns = arpNotes(ctx.chordAt(b), 60);
     for (let s = 0, j = b * ctx.spb; s < ctx.spb; s += every, j += every) {
+      if (!moves(ctx, s)) continue;
       ctx.push({
         i: 'mallet',
         t: ctx.barAt(b, s),

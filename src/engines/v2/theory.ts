@@ -13,6 +13,9 @@ export const MODES = {
 
 export type ModeName = keyof typeof MODES;
 
+/** The modes with a major third over their tonic. */
+export const MAJOR_MODES: ReadonlySet<ModeName> = new Set(['ionian', 'lydian', 'mixolydian']);
+
 /** What a listener would call the mode: "D minor" reads better than "D aeolian". */
 export const MODE_LABEL: Record<ModeName, string> = {
   ionian: 'major',
@@ -98,6 +101,8 @@ export interface ChordSpec {
   alt?: readonly number[];
   /** Semitone shift of the whole chord, for borrowed chords such as bVII in major. */
   shift?: number;
+  /** Semitones above the key's tonic the bass plays, when not the chord's root: a slash chord, or a pedal. */
+  bass?: number;
 }
 
 /** Pitch classes of the chord, root first, then the upper tones in stacking order. */
@@ -136,10 +141,13 @@ export function chordName(key: Key, c: ChordSpec): string {
   const pcs = chordPitchClasses(key, c);
   const root = pcs[0];
   const ivs = new Set(pcs.slice(1).map((p) => mod(p - root, 12)));
+  const over = c.bass === undefined || mod(key.tonic + c.bass, 12) === root
+    ? ''
+    : `/${noteName(mod(key.tonic + c.bass, 12), key)}`;
   for (const [need, q] of QUALITY) {
-    if (need.length === ivs.size && need.every((i) => ivs.has(i))) return noteName(root, key) + q;
+    if (need.length === ivs.size && need.every((i) => ivs.has(i))) return noteName(root, key) + q + over;
   }
-  return noteName(root, key);
+  return noteName(root, key) + over;
 }
 
 // ------------------------------------------------------------------ voice leading

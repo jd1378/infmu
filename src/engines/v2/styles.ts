@@ -1,5 +1,6 @@
+import type { Mood, Motion } from './moods.ts';
 import type { ModeName } from './theory.ts';
-import type { AmpTone, Meter, Role, StyleId, Transition } from './types.ts';
+import type { AmpTone, Arc, Harmony, Meter, Role, Space, StyleId, Surprise, Transition, Tune } from './types.ts';
 
 type Weighted<T> = readonly (readonly [T, number])[];
 type Range = readonly [number, number];
@@ -35,7 +36,22 @@ export interface StyleDef {
   away: number;
   next: Weighted<StyleId>;
   transitions: Weighted<Transition>;
-  room: Range;
+  /** The arcs a piece of the style may tell (see Arc), equally likely. */
+  arcs: readonly Arc[];
+  /** The moods its pieces may be in (see moods.ts), equally likely among those its modes can carry. */
+  moods: readonly Mood[];
+  /** How busy its accompaniment may be; a dance style always drives. */
+  motions: readonly Motion[];
+  /** The harmonic languages it speaks (see Harmony), as its pieces' moods lean. */
+  languages: readonly Harmony[];
+  /** The tunes its pieces may have (see Tune), as their moods lean. */
+  tunes: readonly Tune[];
+  /** The rooms it is recorded in (see Space), closest first. */
+  spaces: readonly Space[];
+  /** The chance a piece leaves its chords to the band, with no pad bed under them (0: always a bed). */
+  bare: number;
+  /** The surprises its pieces may have (see Surprise), as their moods fit. */
+  surprises: readonly Surprise[];
   reverb: Range;
   delayBeats: readonly number[];
   delayFeedback: Range;
@@ -115,7 +131,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.3,
     next: [['drift', 1], ['haze', 3], ['nocturne', 3], ['cathedral', 2], ['garden', 2], ['pulse', 1]],
     transitions: [['pause', 3], ['fade', 3], ['swell', 2]],
-    room: [0.9, 0.97],
+    arcs: ['climb', 'early', 'plateau', 'dissolve'],
+    moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'grief'],
+    motions: ['still', 'flowing'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'lament', 'recitation', 'none'],
+    spaces: ['hall', 'cathedral'],
+    bare: 0,
+    surprises: ['alone', 'keyJump'],
     reverb: [1.7, 2.1],
     delayBeats: [1.5, 0.75, 1],
     delayFeedback: [0.45, 0.6],
@@ -148,7 +171,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.25,
     next: [['haze', 1], ['drift', 3], ['garden', 3], ['nocturne', 2], ['pulse', 2], ['acid', 1]],
     transitions: [['pause', 3], ['fade', 3], ['stop', 2]],
-    room: [0.78, 0.86],
+    arcs: ['climb', 'early', 'plateau', 'cold'],
+    moods: ['wonder', 'tenderness', 'nostalgia', 'peace', 'joy', 'grief'],
+    motions: ['flowing', 'driving'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'lament', 'riff', 'recitation'],
+    spaces: ['close', 'room'],
+    bare: 0.35,
+    surprises: ['subito', 'alone', 'halfTime', 'keyJump'],
     reverb: [1.1, 1.4],
     delayBeats: [0.75, 1.5],
     delayFeedback: [0.3, 0.45],
@@ -181,7 +211,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.3,
     next: [['pulse', 1], ['rise', 3], ['ember', 2], ['haze', 2], ['cathedral', 2], ['acid', 1]],
     transitions: [['pause', 3], ['fade', 2], ['swell', 2], ['stop', 1]],
-    room: [0.84, 0.9],
+    arcs: ['climb', 'early', 'plateau', 'cold', 'lastWord'],
+    moods: ['wonder', 'tenderness', 'nostalgia', 'joy', 'power', 'unease', 'grief'],
+    motions: ['flowing', 'driving'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'lament', 'riff', 'recitation', 'fanfare'],
+    spaces: ['room', 'hall'],
+    bare: 0.3,
+    surprises: ['keyJump', 'subito', 'pause', 'halfTime', 'alone'],
     reverb: [1.4, 1.7],
     delayBeats: [0.75],
     delayFeedback: [0.4, 0.5],
@@ -214,7 +251,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0,
     next: [['rise', 1], ['acid', 3], ['pulse', 3], ['cathedral', 2], ['ember', 2], ['drift', 1]],
     transitions: [['swell', 3], ['pause', 2], ['stop', 2]],
-    room: [0.82, 0.88],
+    arcs: ['climb', 'plateau', 'cold', 'lastWord'],
+    moods: ['wonder', 'transcendence', 'nostalgia', 'joy', 'power', 'unease', 'grief'],
+    motions: ['driving'],
+    languages: ['loop', 'pedal', 'vamp'],
+    tunes: ['song', 'fanfare'],
+    spaces: ['room', 'hall'],
+    bare: 0,
+    surprises: ['keyJump', 'subito', 'pause', 'halfTime'],
     reverb: [1.5, 1.7],
     delayBeats: [0.75],
     delayFeedback: [0.38, 0.46],
@@ -247,7 +291,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.35,
     next: [['cathedral', 1], ['nocturne', 3], ['drift', 2], ['ember', 2], ['rise', 2]],
     transitions: [['pause', 2], ['fade', 2], ['swell', 3]],
-    room: [0.92, 0.96],
+    arcs: ['climb', 'early', 'dissolve', 'lastWord'],
+    moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'power', 'unease', 'grief'],
+    motions: ['still', 'flowing', 'driving'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'lament', 'fanfare'],
+    spaces: ['hall', 'cathedral'],
+    bare: 0,
+    surprises: ['keyJump', 'subito', 'pause', 'halfTime', 'alone'],
     reverb: [1.7, 2],
     delayBeats: [0.75, 1.5],
     delayFeedback: [0.3, 0.4],
@@ -280,7 +331,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0,
     next: [['acid', 1], ['rise', 3], ['pulse', 2], ['haze', 1], ['ember', 1]],
     transitions: [['stop', 2], ['pause', 2], ['swell', 1]],
-    room: [0.8, 0.86],
+    arcs: ['climb', 'plateau', 'cold', 'lastWord'],
+    moods: ['transcendence', 'nostalgia', 'joy', 'power', 'unease'],
+    motions: ['driving'],
+    languages: ['loop', 'pedal', 'vamp'],
+    tunes: ['song'],
+    spaces: ['close', 'room'],
+    bare: 0,
+    surprises: ['subito', 'pause', 'halfTime'],
     reverb: [1.2, 1.5],
     delayBeats: [0.75, 0.5],
     delayFeedback: [0.35, 0.5],
@@ -313,7 +371,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.3,
     next: [['garden', 1], ['haze', 3], ['drift', 3], ['nocturne', 1], ['pulse', 1]],
     transitions: [['pause', 3], ['fade', 3], ['swell', 1]],
-    room: [0.8, 0.88],
+    arcs: ['climb', 'early', 'plateau', 'cold'],
+    moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'joy', 'grief'],
+    motions: ['flowing', 'driving'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'riff', 'recitation'],
+    spaces: ['close', 'room', 'hall'],
+    bare: 0.3,
+    surprises: ['subito', 'alone', 'keyJump'],
     reverb: [1.2, 1.5],
     delayBeats: [0.75, 1],
     delayFeedback: [0.3, 0.45],
@@ -346,7 +411,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.4,
     next: [['nocturne', 1], ['drift', 3], ['cathedral', 2], ['haze', 2], ['garden', 1]],
     transitions: [['pause', 4], ['fade', 3]],
-    room: [0.88, 0.94],
+    arcs: ['climb', 'early', 'dissolve'],
+    moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'joy', 'grief'],
+    motions: ['still', 'flowing', 'driving'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'lament', 'recitation'],
+    spaces: ['close', 'room', 'hall'],
+    bare: 0,
+    surprises: ['alone', 'keyJump', 'pause'],
     reverb: [1.5, 1.8],
     delayBeats: [1.5, 1],
     delayFeedback: [0.2, 0.3],
@@ -385,7 +457,14 @@ export const STYLES: Record<StyleId, StyleDef> = {
     away: 0.2,
     next: [['ember', 1], ['cathedral', 3], ['drift', 2], ['pulse', 2], ['rise', 1]],
     transitions: [['pause', 3], ['fade', 2], ['swell', 2]],
-    room: [0.9, 0.95],
+    arcs: ['climb', 'early', 'lastWord'],
+    moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'power', 'unease', 'grief'],
+    motions: ['still', 'flowing'],
+    languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
+    tunes: ['song', 'lament', 'recitation', 'fanfare', 'none'],
+    spaces: ['hall', 'cathedral'],
+    bare: 0.25,
+    surprises: ['keyJump', 'subito', 'pause', 'halfTime', 'alone'],
     reverb: [1.8, 2.2],
     delayBeats: [0.75],
     delayFeedback: [0.55, 0.65],
@@ -420,6 +499,8 @@ export interface ProgChord {
   alt?: readonly number[];
   /** Semitones the whole chord moves: a chord borrowed from outside the mode (see ChordSpec). */
   shift?: number;
+  /** Semitones above the tonic the bass plays, when not the root (see ChordSpec). */
+  bass?: number;
 }
 
 const P = (...degs: (number | ProgChord)[]): ProgChord[] => degs.map((d) => (typeof d === 'number' ? { deg: d } : d));
@@ -495,4 +576,72 @@ export const PROGRESSIONS: Record<ModeName, ProgChord[][]> = {
   ],
   lydian: [P(0, 1, 0, 1), P(0, 1, 5, 0), P(0, 6, 1, 0), P(0, 1, 2, 1), P(0, 2, 1, 5), P(0, 1, 0, 1, 5, 1, 2, 0)],
   mixolydian: [P(0, 6, 3, 0), P(0, 4, 6, 3), P(0, 6, 0, 3), P(3, 6, 0, 0), P(0, 3, 6, 4), P(0, 6, 3, 0, 0, 6, 3, 4)],
+};
+
+// ------------------------------------------------------------------ harmonic languages (see Harmony)
+
+/**
+ * Laments: the bass walks down by step, the chords over it (slash chords where the bass isn't the root). The minor
+ * one falls from the tonic to the dominant (i, i/b7, VI, V: the descending tetrachord of centuries of laments), or
+ * chromatically (the passus duriusculus: i, V/7, i/b7, IV/6, VI, V); the major one walks down an octave.
+ */
+export const LAMENTS: Partial<Record<ModeName, ProgChord[][]>> = {
+  aeolian: [
+    P(0, { deg: 0, bass: 10 }, 5, MAJOR_V),
+    P(0, { ...MAJOR_V, bass: 11 }, { deg: 0, bass: 10 }, { ...MAJOR_IV, bass: 9 }, 5, MAJOR_V, 0, MAJOR_V),
+  ],
+  harmonic: [
+    P(0, { deg: 0, bass: 10 }, 5, 4),
+    P(0, { deg: 4, bass: 11 }, { deg: 0, bass: 10 }, { ...MAJOR_IV, bass: 9 }, 5, 4, 0, 4),
+  ],
+  dorian: [P(0, { deg: 0, bass: 10 }, { deg: 3, bass: 9 }, 4)],
+  ionian: [
+    P(0, { deg: 4, bass: 11 }, 5, 3),
+    P(0, { deg: 4, bass: 11 }, 5, { deg: 5, bass: 7 }, 3, { deg: 0, bass: 4 }, 1, 4),
+  ],
+};
+
+/** Vamps: the mode's own two chords, two bars each (the Dorian i to IV, the Lydian I to II, the Phrygian i to bII). */
+export const VAMPS: Record<ModeName, ProgChord[][]> = {
+  aeolian: [P(0, 0, 5, 5), P(0, 0, 3, 3)],
+  dorian: [P(0, 0, 3, 3)],
+  phrygian: [P(0, 0, 1, 1)],
+  harmonic: [P(0, 0, MAJOR_V, MAJOR_V)],
+  ionian: [P(0, 0, 3, 3)],
+  lydian: [P(0, 0, 1, 1)],
+  mixolydian: [P(0, 0, 6, 6)],
+};
+
+/**
+ * A colour: one chord from outside the mode that the piece keeps coming back to (the minor iv or the bVI in major,
+ * the major IV in minor, the bVI in Dorian). The modal modes already have theirs (Lydian's II, Mixolydian's bVII).
+ */
+export const COLOURS: Partial<Record<ModeName, readonly ProgChord[]>> = {
+  ionian: [MINOR_IV, FLAT_VI],
+  aeolian: [MAJOR_IV],
+  harmonic: [MAJOR_IV],
+  dorian: [{ deg: 0, shift: -4, alt: [0, 1] }],
+};
+
+/** The chord an open ending stops on: the mode's plagal or deceptive colour, never home. */
+export const OPEN_ENDS: Record<ModeName, ProgChord> = {
+  ionian: { deg: 3 },
+  lydian: { deg: 1 },
+  mixolydian: { deg: 6 },
+  dorian: { deg: 3 },
+  aeolian: { deg: 5 },
+  harmonic: { deg: 5 },
+  phrygian: { deg: 1 },
+};
+
+/**
+ * The rooms, as the reverb's decay (its feedback: 0.35 to 0.5 is under a second, 0.95 six seconds, measured by
+ * out/research/novelty/rt60.ts), how loud its return is against the style's, how much of the echo is heard, and how
+ * strong the early reflections are (a close room's walls are near).
+ */
+export const SPACES: Record<Space, { room: readonly [number, number]; reverb: number; echo: number; early: number }> = {
+  close: { room: [0.35, 0.5], reverb: 0.6, echo: 0.5, early: 1.4 },
+  room: { room: [0.65, 0.75], reverb: 0.85, echo: 0.8, early: 1.15 },
+  hall: { room: [0.84, 0.9], reverb: 1, echo: 1, early: 1 },
+  cathedral: { room: [0.93, 0.97], reverb: 1.15, echo: 1, early: 0.85 },
 };

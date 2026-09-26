@@ -9,6 +9,7 @@
 // hurts; a bassist's touch shows in dynamics). A style played by a band has a drummer too (see drummer()).
 // Everything is drawn from the seed's own streams, so a seed still plays the same performance.
 
+import { MOODS } from '../moods.ts';
 import type { Rng } from '../rng.ts';
 import { MODES, pc } from '../theory.ts';
 import { type Ev, isMelody, type Note, type StyleId, TAKES, VIB_HELD } from '../types.ts';
@@ -58,13 +59,15 @@ function player(ctx: Ctx, rng: Rng, hands: Rng, { drift, jitter, loud: moves, me
   const time = wander(hands.fork('time'));
   const loud = wander(rng.fork('loud'));
   const phrase = 4 * ctx.bar;
+  // the mood's touch: held on in grief or peace, detached in joy
+  const legato = MOODS[ctx.mv.mood].legato;
   return (n: Played, breath: boolean, short: boolean): void => {
     let v = n.v * (1 + moves * (loud(n.t) + rng.jitter(0.8)));
     // a phrase swells towards its middle and relaxes at its end
     if (melody) v *= 0.9 + 0.2 * Math.sin(Math.PI * ((n.t % phrase) / phrase));
     let t = n.t + drift * time(n.t) + rng.jitter(jitter);
     let d = n.d;
-    if (d !== undefined && moves) d *= short ? rng.range(0.72, 0.92) : rng.range(0.9, 1);
+    if (d !== undefined && moves) d *= Math.min(1, (short ? rng.range(0.72, 0.92) : rng.range(0.9, 1)) * legato);
     // the last note before a breath comes a little late and is held on
     if (breath && melody) {
       t += Math.min(0.035, 0.06 * ctx.beat) * rng.range(0.5, 1);

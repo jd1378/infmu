@@ -1,21 +1,25 @@
 import { assert, assertAlmostEquals, assertEquals, assertNotEquals } from '@std/assert';
 import { composeSection, letGo } from '../../../src/engines/v2/compose/index.ts';
 import { Ctx, sectionChords, sectionKey } from '../../../src/engines/v2/compose/context.ts';
+import { LOUD_OPENINGS } from '../../../src/engines/v2/arcs.ts';
+import { type Mood, moodModes, MOODS } from '../../../src/engines/v2/moods.ts';
+import { OPEN_ENDS, SPACES } from '../../../src/engines/v2/styles.ts';
 import { guitarist, PLAYERS } from '../../../src/engines/v2/compose/guitarist.ts';
 import { perform } from '../../../src/engines/v2/compose/perform.ts';
 import { barSeconds, Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
 import { CATHEDRAL_TIMES, DRIFT_TIMES, EMBER_TIMES, GARDEN_TIMES } from '../../../src/engines/v2/compose/grooves.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
-import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
+import { freeverb, lufs } from '../../../src/engines/v2/synth/dsp.ts';
 import { snare } from '../../../src/engines/v2/synth/instruments.ts';
 import { piano } from '../../../src/engines/v2/synth/modal.ts';
-import { early, melodyOffset, renderScore, tape } from '../../../src/engines/v2/synth/render.ts';
+import { balanceLift, early, melodyOffset, renderScore, tape } from '../../../src/engines/v2/synth/render.ts';
 import { string } from '../../../src/engines/v2/synth/strings.ts';
 import { wind } from '../../../src/engines/v2/synth/voice.ts';
+import { Rng } from '../../../src/engines/v2/rng.ts';
 import { Clock, tempoAt } from '../../../src/engines/v2/tempo.ts';
-import { MODES, pc } from '../../../src/engines/v2/theory.ts';
-import { type Ev, isMelody, type StyleId, TAKES } from '../../../src/engines/v2/types.ts';
+import { mod, MODES, pc } from '../../../src/engines/v2/theory.ts';
+import { type Arc, type Ev, isMelody, type Role, type StyleId, TAKES } from '../../../src/engines/v2/types.ts';
 
 Deno.test('movements run as long as the listener chose', () => {
   const bounds = { short: [95, 175], standard: [165, 265], long: [265, 400] } as const;
@@ -198,20 +202,119 @@ Deno.test('the melody sits a set distance under the band, however dense the band
   assert(checked >= 3, `only ${checked} sections checked`);
 });
 
-Deno.test('a movement builds: it starts low and peaks in its last chorus or drop', () => {
-  for (const style of STYLE_IDS) {
-    for (let seed = 0; seed < 4; seed++) {
-      const mv = new Song(`arc-${style}-${seed}`, [style]).movement(0);
-      const sounding = mv.sections.filter((s) => s.role !== 'rest');
-      const big = sounding.map((s, i) => [s, i] as const).filter(([s]) => s.role === 'chorus' || s.role === 'drop');
-      assert(sounding[0].energy < 0.5, `${style}: opens at ${sounding[0].energy.toFixed(2)}`);
-      if (!big.length) continue;
-      const peak = Math.max(...sounding.map((s) => s.energy));
-      assertEquals(peak, 1);
-      assertEquals(big[big.length - 1][0].energy, peak, `${style}: the last ${big[0][0].role} is not the peak`);
-      assert(big[0][0].energy < peak || big.length === 1);
+Deno.test("a piece tells one of its style's arcs: seldom the one before, and a loud opening only after a pause", () => {
+  const BIG: readonly Role[] = ['chorus', 'drop'];
+  const seen = new Map<StyleId, Set<Arc>>();
+  let twice = 0;
+  for (let k = 0; k < 40; k++) {
+    const song = new Song(`arcs-${k}`);
+    for (let m = 0; m < 12; m++) {
+      const mv = song.movement(m);
+      const prev = m ? song.movement(m - 1) : null;
+      const at = `${mv.style} ${mv.arc}`;
+      assert(STYLES[mv.style].arcs.includes(mv.arc), at);
+      seen.set(mv.style, (seen.get(mv.style) ?? new Set()).add(mv.arc));
+      // (only when its form can tell no other: one with no early big part, after a fade)
+      if (mv.arc === prev?.arc) twice++;
+      if (LOUD_OPENINGS.has(mv.arc)) assert(prev && prev.transition !== 'fade', `${at} opens loud after a fade`);
+      const s = mv.sections.filter((x) => x.role !== 'rest');
+      const e = s.map((x) => x.energy);
+      const total = s.reduce((n, x) => n + x.bars, 0);
+      const pos = s.map((_, i) => s.slice(0, i).reduce((n, x) => n + x.bars, 0) / total);
+      const bigs = s.map((x, i) => (BIG.includes(x.role) ? i : -1)).filter((i) => i >= 0);
+      const peak = e.indexOf(1);
+      assert(peak >= 0, `${at}: no peak`);
+      if (mv.arc === 'climb') assert(e[0] < 0.5 && e[bigs.at(-1)!] === 1, `${at}: ${e}`);
+      if (mv.arc === 'cold') assert(BIG.includes(s[0].role) && e[0] >= 0.6 && e[bigs.at(-1)!] === 1, `${at}: ${e}`);
+      if (mv.arc === 'lastWord') {
+        assert(BIG.includes(s.at(-1)!.role) && e.at(-1) === 1, `${at} ends on ${s.at(-1)!.role}`);
+        assertEquals(mv.transition, 'pause');
+      }
+      if (mv.arc === 'early') {
+        assert(pos[peak] < 0.6, `${at} peaks at ${pos[peak].toFixed(2)}`);
+        for (const i of bigs.filter((i) => i > peak)) assert(s[i].treatment === 'hushed' && e[i] <= 0.5, at);
+      }
+      if (mv.arc === 'plateau') {
+        // (but for a surprise's sudden hush)
+        s.forEach((x, i) =>
+          assert(x.role === 'intro' || x.role === 'outro' || x.treatment || e[i] >= 0.55, `${at}: ${e}`)
+        );
+      }
+      if (mv.arc === 'dissolve') {
+        assert(e[0] === 1 && e.every((x, i) => !i || x <= e[i - 1]), `${at}: ${e}`);
+        assertEquals(s.at(-1)!.treatment, 'bare');
+      }
     }
   }
+  for (const id of STYLE_IDS) assertEquals(seen.get(id)?.size, STYLES[id].arcs.length, `${id} arcs heard`);
+  assert(twice <= 5, `${twice} arcs told twice running`);
+});
+
+Deno.test('pieces tell different stories: where they peak, how they start and end', () => {
+  const pieces: { peak: number; start: number; end: number }[] = [];
+  for (let k = 0; k < 60; k++) {
+    const song = new Song(`stories-${k}`);
+    for (let m = 0; m < 12; m++) {
+      const s = song.movement(m).sections.filter((x) => x.role !== 'rest');
+      const total = s.reduce((n, x) => n + x.bars, 0);
+      const i = s.findIndex((x) => x.energy === 1);
+      pieces.push({
+        peak: (s.slice(0, i).reduce((n, x) => n + x.bars, 0) + s[i].bars / 2) / total,
+        start: s[0].energy,
+        end: s.at(-1)!.energy,
+      });
+    }
+  }
+  const share = (f: (p: typeof pieces[0]) => boolean) => pieces.filter(f).length / pieces.length;
+  // one arc for every piece peaked in its last 40% (99%), and none started or ended loud
+  assert(share((p) => p.peak < 0.6) >= 0.2, `${share((p) => p.peak < 0.6)} peak early`);
+  assert(share((p) => p.start >= 0.6) >= 0.1, `${share((p) => p.start >= 0.6)} start loud`);
+  assert(share((p) => p.end >= 0.6) >= 0.08, `${share((p) => p.end >= 0.6)} end loud`);
+});
+
+Deno.test('a hushed section plays without its rhythm section, a bare one only its tune over the bed; the last word ends on a hit', () => {
+  const rhythm = new Set(['kick', 'snare', 'hat', 'tom', 'perc', 'bass', 'acid', 'impact', 'rise', 'sweep']);
+  const bed = new Set(['pad', 'organ', 'drone', 'choir', 'vinyl', 'breath', 'gap']);
+  const found = { hushed: 0, bare: 0, lastWord: 0 };
+  for (let k = 0; k < 12 && (found.hushed < 3 || found.bare < 2 || found.lastWord < 3); k++) {
+    const song = new Song(`treated-${k}`);
+    for (let m = 0; m < 8; m++) {
+      const mv = song.movement(m);
+      mv.sections.forEach((sec, i) => {
+        const last = mv.arc === 'lastWord' && i === mv.sections.findLastIndex((x) => x.role !== 'rest');
+        if (!sec.treatment && !last) return;
+        const score = composeSection(song, mv.firstSection + i);
+        if (sec.treatment === 'hushed') {
+          found.hushed++;
+          assert(
+            score.events.every((e) => !rhythm.has(e.i) && !(e.i === 'string' && e.k === 'overdrive')),
+            `${mv.style}: a hushed ${sec.role} kept ${[
+              ...new Set(score.events.filter((e) => rhythm.has(e.i)).map((e) => e.i)),
+            ]}`,
+          );
+        }
+        if (sec.treatment === 'bare') {
+          found.bare++;
+          // (and the hand-over into the next piece)
+          const handOver = (e: Ev) => e.i === 'rise' && e.k === 'swell';
+          assert(
+            score.events.every((e) => isMelody(e) || bed.has(e.i) || handOver(e)),
+            `${mv.style}: a bare ${sec.role}`,
+          );
+        }
+        if (last) {
+          found.lastWord++;
+          // the band's last downbeat, with a crash, and nothing new after its first beat
+          const from = score.bars[score.bars.length - 2];
+          const beat = 60 / mv.bpm;
+          assert(score.events.some((e) => e.i === 'perc' && /rash/.test(e.k) && Math.abs(e.t - from) < 0.08));
+          const after = score.events.filter((e) => e.t > from + 1.5 * beat && e.i !== 'gap' && e.i !== 'vinyl');
+          assertEquals(after.map((e) => e.i), [], `${mv.style}: plays on after its last hit`);
+        }
+      });
+    }
+  }
+  assert(found.hushed >= 3 && found.bare >= 2 && found.lastWord >= 3, JSON.stringify(found));
 });
 
 Deno.test('every chorus of a movement restates the same hook on the same voice', () => {
@@ -317,10 +420,11 @@ Deno.test('a part counts its returns, not its sections', () => {
         assertEquals(ctx.turn, turns.get(sec.role) ?? 0);
         turns.set(sec.role, ctx.turn + 1);
       }
-      const later = mv.sections.slice(k + 1).some((s, j) =>
-        s.role === sec.role && mv.sections[k + j]?.role !== sec.role
-      );
-      assertEquals(ctx.finalTurn, !later);
+      // the last full turn: a hushed return after it (an afterglow) doesn't count
+      let end = k;
+      while (mv.sections[end + 1]?.role === sec.role) end++;
+      const later = mv.sections.slice(end + 1).some((s) => s.role === sec.role && !s.treatment);
+      assertEquals(ctx.finalTurn, !sec.treatment && !later);
     });
   }
   assert(runs > 5, `only ${runs} continued runs`);
@@ -332,6 +436,8 @@ Deno.test('a movement opens quietly: no hit or bell on its first beat', () => {
     const song = new Song(`opening-${seed}`);
     for (let m = 0; m < 4; m++) {
       const mv = song.movement(m);
+      // a cold open starts on its big part, as loud as it means to be
+      if (LOUD_OPENINGS.has(mv.arc)) continue;
       const first = composeSection(song, mv.firstSection).events.filter((e) => e.t < 0.1);
       const hits = first.filter((e) => e.i === 'impact' || e.i === 'bell');
       // only a reverse swell from the piece before lands on a soft downbeat
@@ -524,9 +630,14 @@ Deno.test('a returning melody is ornamented with grace notes; its first statemen
 });
 
 Deno.test('the band listens: softer under the melody, fuller in its rests, swelling into a bigger part', () => {
-  const song = new Song('listening', ['garden']);
+  // a piece with a part that leads into a much bigger one
+  const jump = (mv: ReturnType<Song['movement']>) =>
+    mv.sections.findIndex((s, i) => mv.sections[i + 1] && mv.sections[i + 1].energy - s.energy > 0.2);
+  const song = [...Array(20).keys()].map((k) => new Song(`listening-${k}`, ['garden'])).find((x) =>
+    jump(x.movement(0)) >= 0
+  )!;
   const mv = song.movement(0);
-  const k = mv.sections.findIndex((s, i) => mv.sections[i + 1] && mv.sections[i + 1].energy - s.energy > 0.2);
+  const k = jump(mv);
   const ctx = new Ctx(song, mv.firstSection + k);
   ctx.events.length = 0;
   // a melody note in every other bar, and a chord on every beat under it all
@@ -902,7 +1013,7 @@ Deno.test('post-rock rises in long waves: quiet without drums, a crescendo, a sl
         for (const e of s.events) {
           if (e.i !== 'bass') continue;
           const c = s.chords.find((c) => e.t >= c.t - 0.05 && e.t < c.t + c.d - 0.05);
-          assert(!c || c.pcs.length < 2 || (e.n - c.pcs[0]) % 12 === 0, `${seed}: bass ${e.n} under ${c?.name}`);
+          assert(!c || c.pcs.length < 2 || pc(e.n - c.bass) === 0, `${seed}: bass ${e.n} under ${c?.name}`);
         }
       }
     });
@@ -1009,4 +1120,354 @@ Deno.test("each piece has its own lead guitarist: their vibrato, slides and bend
   assert(who.size >= 5, `only ${[...who]} played`);
   assert(sung >= 12, `the lead guitarist shook their held notes their way in ${sung} pieces`);
   assertEquals(Object.keys(PLAYERS).length, 6);
+});
+
+Deno.test('a piece is written in one mood: its key, tempo, sound, room and dynamics lean the same way', () => {
+  const heard = new Set<Mood>();
+  let again = 0;
+  for (let k = 0; k < 30; k++) {
+    const song = new Song(`moods-${k}`);
+    for (let m = 0; m < 10; m++) {
+      const mv = song.movement(m);
+      const style = STYLES[mv.style];
+      const feel = MOODS[mv.mood];
+      const at = `${mv.style} ${mv.mood}`;
+      heard.add(mv.mood);
+      if (m && song.movement(m - 1).mood === mv.mood) again++;
+      assert(style.moods.includes(mv.mood) && style.motions.includes(mv.motion), at);
+      // the modes the mood leans on, when the style has any
+      if (moodModes(style.modes, mv.mood).length) assert((feel.modes[mv.key.mode] ?? 0) > 0, `${at} in ${mv.key.mode}`);
+      // its part of the style's tempo range (a 6/8 piece counts dotted quarters)
+      const q = mv.meter === '6/8' ? mv.bpm / 1.125 : mv.bpm;
+      const [lo, hi] = [style.bpm[0], style.bpm[1] + 1];
+      // (to the bpm it rounds to)
+      const [slowest, fastest] = feel.tempo.map((x) => lo + (hi - lo) * x);
+      assert(q >= slowest - 1.1 && q <= fastest + 0.6, `${at} at ${mv.bpm} bpm`);
+      assert(mv.tone.bright >= feel.bright[0] && mv.tone.bright <= feel.bright[1], at);
+      assertAlmostEquals(mv.mix.peak, style.dynamics[0] + feel.dynamics[0]);
+      // a room the style is recorded in, its reverb as that room's
+      assert(style.spaces.includes(mv.space), `${at} in a ${mv.space}`);
+      assert(mv.mix.room >= SPACES[mv.space].room[0] && mv.mix.room <= SPACES[mv.space].room[1], at);
+    }
+  }
+  assertEquals(heard.size, Object.keys(MOODS).length);
+  assert(again <= 6, `${again} moods told twice running`);
+  // the dance styles always drive; the calmest never unsettle
+  for (const id of ['rise', 'acid'] as const) assertEquals(STYLES[id].motions, ['driving']);
+  for (const id of ['drift', 'nocturne'] as const) assert(!STYLES[id].moods.includes('unease'));
+});
+
+Deno.test('a still piece accompanies on the beats, a flowing one in eighths; only joy bounces', () => {
+  let checked = 0;
+  let off = 0;
+  let oompah = 0;
+  for (let k = 0; k < 16; k++) {
+    const song = new Song(`motion-${k}`);
+    for (let m = 0; m < 5; m++) {
+      const mv = song.movement(m);
+      const spb = mv.meter === '4/4' ? 16 : 12;
+      const beat = mv.meter === '6/8' ? 6 : 4;
+      mv.sections.forEach((_, i) => {
+        const s = composeSection(song, mv.firstSection + i);
+        const stepOf = (t: number) => {
+          const b = s.bars.findLastIndex((x) => x <= t + 0.02);
+          if (b < 0 || b >= s.bars.length - 1) return null;
+          const x = ((t - s.bars[b]) / (s.bars[b + 1] - s.bars[b])) * spb;
+          return Math.abs(x - Math.round(x)) <= 0.4 ? { bar: b, step: Math.round(x) % spb } : null;
+        };
+        for (const e of s.events) {
+          const accompanies = ['pluck', 'mallet', 'piano', 'bass', 'string'].includes(e.i) && !('lead' in e) &&
+            !(e.i === 'string' && e.swell !== undefined);
+          if (mv.motion === 'driving' || !accompanies) continue;
+          const at = stepOf(e.t);
+          if (!at) continue;
+          checked++;
+          if (mv.motion === 'still' ? at.step % beat : at.step % 2) off++;
+        }
+        if (mv.mood === 'joy') return;
+        // no oom-pah: on the beats of a bar, never the root on one and its fifth on another
+        const bars = new Map<number, Set<number>>();
+        for (const e of s.events) {
+          if (e.i !== 'bass') continue;
+          const at = stepOf(e.t);
+          const chord = s.chords.find((c) => e.t >= c.t - 0.05 && e.t < c.t + c.d - 0.05);
+          if (!at || at.step % beat || !chord) continue;
+          bars.set(at.bar, (bars.get(at.bar) ?? new Set()).add(pc(e.n - chord.bass)));
+        }
+        for (const set of bars.values()) if (set.has(0) && set.has(7)) oompah++;
+      });
+    }
+  }
+  assert(checked > 500, `only ${checked} notes checked`);
+  assert(off / checked < 0.02, `${off} of ${checked} accompanying notes move faster than their piece`);
+  assertEquals(oompah, 0, 'a bass bounced between root and fifth outside joy');
+});
+
+Deno.test('a piece speaks one harmonic language: a pedal, a lament, a vamp, a colour, or its loops; some end open', () => {
+  const seen = new Set<string>();
+  let open = 0;
+  let pieces = 0;
+  let steps = 0;
+  let changes = 0;
+  for (let k = 0; k < 30; k++) {
+    const song = new Song(`languages-${k}`);
+    for (let m = 0; m < 10; m++) {
+      const mv = song.movement(m);
+      const at = `${mv.style} ${mv.mood} ${mv.harmony} in ${mv.key.mode}`;
+      pieces++;
+      seen.add(mv.harmony);
+      assert(STYLES[mv.style].languages.includes(mv.harmony), at);
+      assert((MOODS[mv.mood].languages[mv.harmony] ?? 0) > 0 || mv.harmony === 'loop', at);
+      const verse = mv.progressions.main;
+      if (mv.harmony === 'vamp') assert(new Set(verse.map((c) => `${c.deg}${c.alt}`)).size <= 2, at);
+      if (mv.harmony === 'lament') {
+        // its bass walks down: one or two semitones at each change, but for the way back up to the tonic
+        const bass = verse.map((c) => c.bass ?? MODES[mv.key.mode][c.deg % 7]);
+        bass.forEach((b, i) => {
+          if (!i || b === bass[i - 1]) return;
+          changes++;
+          if ([1, 2].includes(mod(bass[i - 1] - b, 12))) steps++;
+        });
+      }
+      if (mv.harmony === 'colour') {
+        assert(verse.some((c) => c.shift || c.alt), `${at}: no colour in ${JSON.stringify(verse)}`);
+      }
+      // the bass holds the tonic under every part but the bridge (the fifth under a build)
+      mv.sections.forEach((sec, i) => {
+        const slots = sectionChords(mv, i);
+        if (mv.harmony === 'pedal' && sec.role !== 'bridge') {
+          const want = sec.role === 'build' || sec.role === 'prechorus' ? 7 : 0;
+          assert(slots.every((c) => c.spec.bass === want), `${at}: a ${sec.role} without its pedal`);
+        }
+      });
+      // it ends home on the tonic, or open on the mode's plagal or deceptive chord
+      const last = mv.sections.findLastIndex((x) => x.role !== 'rest');
+      const end = sectionChords(mv, last).at(-1)!.spec;
+      if (mv.ending === 'open') {
+        open++;
+        assertEquals(end.deg, OPEN_ENDS[mv.key.mode].deg, at);
+      } else assert(end.deg === 0 && !end.shift, `${at} ends on ${end.deg}`);
+    }
+  }
+  assertEquals(seen.size, 5);
+  assert(open / pieces > 0.05 && open / pieces < 0.25, `${open} of ${pieces} end open`);
+  assert(changes > 20 && steps / changes >= 0.6, `a lament's bass steps down at ${steps} of ${changes} changes`);
+});
+
+Deno.test("a pedal holds the bass on the tonic; a piano's left hand plays a lament's walking bass", () => {
+  let pedalled = 0;
+  let held = 0;
+  let laments = 0;
+  for (let k = 0; k < 40 && (pedalled < 200 || laments < 20); k++) {
+    const song = new Song(`pedal-bass-${k}`, ['nocturne', 'ember', 'drift', 'cathedral']);
+    for (let m = 0; m < 6; m++) {
+      const mv = song.movement(m);
+      if (mv.harmony !== 'pedal' && mv.harmony !== 'lament') continue;
+      mv.sections.forEach((sec, i) => {
+        if (sec.role === 'bridge' || sec.role === 'build' || sec.role === 'prechorus' || sec.role === 'rest') return;
+        const s = composeSection(song, mv.firstSection + i);
+        const chordAt = (t: number) => s.chords.find((c) => t >= c.t - 0.05 && t < c.t + c.d - 0.05);
+        if (mv.harmony === 'pedal') {
+          for (const e of s.events.filter((e) => e.i === 'bass')) {
+            pedalled++;
+            if (pc(e.n - sectionKey(mv, i).tonic) === 0) held++;
+          }
+        }
+        // (in the parts the left hand plays figures over the bass; a break holds voiced chords)
+        if (mv.harmony === 'lament' && mv.style === 'nocturne' && (sec.role === 'verse' || sec.role === 'chorus')) {
+          // the left hand's lowest note on each chord's downbeat is the chord's bass
+          for (const c of s.chords) {
+            const low = s.events.filter((e): e is Extract<Ev, { i: 'piano' }> =>
+              e.i === 'piano' && !isMelody(e) && Math.abs(e.t - c.t) < 0.06
+            );
+            if (!low.length || !chordAt(c.t)) continue;
+            laments++;
+            assertEquals(pc(Math.min(...low.flatMap((e) => e.n)) - c.bass), 0, `${c.name}`);
+          }
+        }
+      });
+    }
+  }
+  assert(pedalled >= 200 && held / pedalled > 0.9, `${held} of ${pedalled} bass notes on the pedal`);
+  assert(laments >= 20, `only ${laments} lament chords played`);
+});
+
+Deno.test('a tune is a song, a lament, a riff, a recitation or a fanfare, or none; a riff never in three or major', () => {
+  type Line = { falls: number; statements: number; leaps: number; ivs: number; span: number[] };
+  const by = new Map<string, Line>();
+  for (let k = 0; k < 24; k++) {
+    const song = new Song(`tunes-${k}`);
+    for (let m = 0; m < 6; m++) {
+      const mv = song.movement(m);
+      const at = `${mv.style} ${mv.mood} ${mv.tune}`;
+      assert(STYLES[mv.style].tunes.includes(mv.tune), at);
+      assert(mv.tune === 'song' || (MOODS[mv.mood].tunes[mv.tune] ?? 0) > 0, at);
+      if (mv.tune === 'riff') {
+        assert(mv.meter === '4/4' && !['ionian', 'lydian', 'mixolydian'].includes(mv.key.mode), at);
+      }
+      const r = by.get(mv.tune) ?? { falls: 0, statements: 0, leaps: 0, ivs: 0, span: [] };
+      by.set(mv.tune, r);
+      mv.sections.forEach((sec, i) => {
+        if (sec.role !== 'verse' && sec.role !== 'chorus' && sec.role !== 'drop') return;
+        const s = composeSection(song, mv.firstSection + i);
+        const tune = s.events.filter(isMelody);
+        if (mv.tune === 'none') return assertEquals(tune.length, 0, `${at} sings`);
+        // the lead voice's notes (the voice the tune starts on), a chord's top one, a tremolo as one note
+        const voice = (e: Ev) => `${e.i}:${'k' in e ? e.k : ''}`;
+        const all = tune.filter((e) => voice(e) === voice(tune[0])).flatMap((e) =>
+          'ns' in e
+            ? e.ns.map((n) => ({ t: n.t, n: n.n }))
+            : [{ t: e.t, n: Math.max(...[(e as { n: number | number[] }).n].flat()) }]
+        ).sort((a, b) => a.t - b.t);
+        const ns = all.filter((x, j) => !(j && x.n === all[j - 1].n && x.t - all[j - 1].t < 0.25));
+        for (let j = 1; j < ns.length; j++, r.ivs++) if (Math.abs(ns[j].n - ns[j - 1].n) >= 5) r.leaps++;
+        const two = 2 * (s.bars[1] - s.bars[0]);
+        for (let t0 = 0; t0 < s.duration; t0 += two) {
+          const st = ns.filter((x) => x.t >= t0 && x.t < t0 + two);
+          if (st.length < 3) continue;
+          r.statements++;
+          if (st.at(-1)!.n < st[0].n - 2) r.falls++;
+          r.span.push(Math.max(...st.map((x) => x.n)) - Math.min(...st.map((x) => x.n)));
+        }
+      });
+    }
+  }
+  const song = by.get('song')!;
+  const falls = (l: Line) => l.falls / l.statements;
+  const span = (l: Line) => l.span.reduce((a, b) => a + b, 0) / l.span.length;
+  for (const t of ['lament', 'fanfare', 'recitation']) assert(by.get(t)!.statements > 30, `few ${t} statements`);
+  assert(falls(by.get('lament')!) > falls(song) + 0.15, `a lament falls in ${falls(by.get('lament')!)}`);
+  assert(
+    by.get('fanfare')!.leaps / by.get('fanfare')!.ivs > song.leaps / song.ivs + 0.05,
+    `fanfare ${by.get('fanfare')!.leaps}/${by.get('fanfare')!.ivs}, song ${song.leaps}/${song.ivs}`,
+  );
+  assert(span(by.get('recitation')!) < span(song) - 1, `a recitation spans ${span(by.get('recitation')!)}`);
+});
+
+Deno.test('a piece is recorded in its own room, sometimes with no bed; its rhythm section grows with it', () => {
+  let bare = 0;
+  let pieces = 0;
+  const rooms = new Set<string>();
+  for (let k = 0; k < 20; k++) {
+    const song = new Song(`rooms-${k}`);
+    for (let m = 0; m < 6; m++) {
+      const mv = song.movement(m);
+      pieces++;
+      rooms.add(mv.space);
+      if (mv.texture !== 'bare') continue;
+      bare++;
+      assert(STYLES[mv.style].bare > 0 && mv.motion !== 'still', `${mv.style} ${mv.motion} is bare`);
+      mv.sections.forEach((_, i) => {
+        assert(!composeSection(song, mv.firstSection + i).events.some((e) => e.i === 'pad'), `${mv.style}: a pad`);
+      });
+    }
+  }
+  assertEquals(rooms.size, 4);
+  assert(bare > 0 && bare / pieces < 0.3, `${bare} of ${pieces} bare`);
+  // a close room decays in about a second, a cathedral in six (the decay of the reverb's energy by 60 dB)
+  const rt60 = (room: number) => {
+    const sr = 16000;
+    const n = 9 * sr;
+    const inp = new Float32Array(n);
+    const noise = new Rng(7);
+    for (let i = 0; i < 0.02 * sr; i++) inp[i] = noise.range(-1, 1);
+    const [l, r] = [new Float32Array(n), new Float32Array(n)];
+    freeverb(sr, inp, l, r, room, 1, 0, 0.35);
+    const e: number[] = new Array(n);
+    for (let i = n - 1, acc = 0; i >= 0; i--) e[i] = acc += l[i] * l[i] + r[i] * r[i];
+    const at = (db: number) => e.findIndex((x) => 10 * Math.log10(x / e[0]) <= db);
+    return (2 * (at(-35) - at(-5))) / sr;
+  };
+  assert(rt60(SPACES.close.room[1]) < 1.3, `close: ${rt60(SPACES.close.room[1]).toFixed(2)} s`);
+  assert(rt60(SPACES.cathedral.room[0]) > 4, `cathedral: ${rt60(SPACES.cathedral.room[0]).toFixed(2)} s`);
+  // the drums and bass sit under the bed in a quiet part and over it at the peak
+  assert(balanceLift(0.2) < -2 && balanceLift(0.7) === 0 && balanceLift(1) > 1.5);
+});
+
+Deno.test('about half the pieces have one surprise, after their pattern, never the kind of the two before', () => {
+  const BIG: readonly Role[] = ['chorus', 'drop'];
+  let placed = 0;
+  let pieces = 0;
+  const kinds = new Set<string>();
+  for (let k = 0; k < 40; k++) {
+    const song = new Song(`surprises-${k}`);
+    for (let m = 0; m < 10; m++) {
+      const mv = song.movement(m);
+      pieces++;
+      if (!mv.surprise) continue;
+      placed++;
+      kinds.add(mv.surprise);
+      const at = `${mv.style} ${mv.mood} ${mv.arc}: ${mv.surprise}`;
+      assert(STYLES[mv.style].surprises.includes(mv.surprise) && (MOODS[mv.mood].surprises[mv.surprise] ?? 0) > 0, at);
+      for (const d of [1, 2]) if (m >= d) assert(song.movement(m - d).surprise !== mv.surprise, `${at} again`);
+      const s = mv.sections;
+      const firstBig = s.findIndex((x) => BIG.includes(x.role));
+      const peak = s.findIndex((x) => x.energy === Math.max(...s.map((y) => y.energy)));
+      const marked = s.map((x, i) => (x.surprise ? i : -1)).filter((i) => i >= 0);
+      switch (mv.surprise) {
+        case 'subito': {
+          const i = s.findIndex((x, j) => x.treatment === 'hushed' && BIG.includes(x.role) && j > firstBig && j < peak);
+          assert(i > 0, at);
+          break;
+        }
+        case 'alone':
+          assert(
+            s.some((x, j) => x.treatment === 'bare' && ['verse', 'bridge', 'break'].includes(x.role) && j > firstBig),
+            at,
+          );
+          break;
+        case 'pause':
+          assertEquals(marked.length, 1, at);
+          assert(BIG.includes(s[marked[0]].role) && marked[0] > firstBig && s[marked[0]].bars >= 8, at);
+          break;
+        case 'halfTime':
+          assert(mv.meter === '4/4' && marked.includes(peak) && marked.every((i) => s[i].surprise === 'halfTime'), at);
+          break;
+        case 'keyJump': {
+          const last = s.findLastIndex((x) => BIG.includes(x.role));
+          assertEquals(s[last].shift, 4, at);
+          break;
+        }
+      }
+    }
+  }
+  assertEquals(kinds.size, 5);
+  assert(placed / pieces > 0.35 && placed / pieces < 0.7, `${placed} of ${pieces} pieces have a surprise`);
+});
+
+Deno.test('a pause stops the band for the rest of a bar and it comes back; half time moves the backbeat to three', () => {
+  let pauses = 0;
+  let halves = 0;
+  for (let k = 0; k < 40 && (pauses < 3 || halves < 3); k++) {
+    const song = new Song(`moments-${k}`);
+    for (let m = 0; m < 8; m++) {
+      const mv = song.movement(m);
+      mv.sections.forEach((sec, i) => {
+        if (!sec.surprise) return;
+        const s = composeSection(song, mv.firstSection + i);
+        const bar = (b: number) => s.bars[b];
+        if (sec.surprise === 'pause') {
+          pauses++;
+          const b = Math.floor(sec.bars / 2);
+          const beat = (bar(b + 1) - bar(b)) / (mv.meter === '4/4' ? 4 : 3);
+          const inside = s.events.filter((e) =>
+            e.t > bar(b) + beat + 0.06 && e.t < bar(b + 1) - 0.06 && e.i !== 'gap' && e.i !== 'vinyl'
+          );
+          assertEquals(inside.map((e) => e.i), [], `${mv.style}: plays on through its pause`);
+        }
+        if (sec.surprise === 'halfTime' && s.events.some((e) => e.i === 'snare')) {
+          halves++;
+          for (const e of s.events) {
+            if (e.i !== 'snare' && e.i !== 'kick') continue;
+            const b = s.bars.findLastIndex((x) => x <= e.t + 0.03);
+            if (b < 0 || b >= s.bars.length - 1) continue;
+            const step = Math.round(((e.t - bar(b)) / (bar(b + 1) - bar(b))) * 16) % 16;
+            if (e.i === 'snare') assert(step !== 4 && step !== 12, `${mv.style}: a backbeat on ${step}`);
+            else assert(![4, 8, 12].includes(step), `${mv.style}: a kick on ${step}`);
+          }
+        }
+      });
+    }
+  }
+  assert(pauses >= 3 && halves >= 3, `${pauses} pauses, ${halves} half-time parts`);
 });

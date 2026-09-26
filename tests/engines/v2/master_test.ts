@@ -3,6 +3,7 @@
 
 import { assert, assertEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v2/compose/index.ts';
+import { MOODS } from '../../../src/engines/v2/moods.ts';
 import { Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
@@ -189,9 +190,11 @@ function sections(): { climax: Score; intro: Score; old: (s: Score) => Score } {
     return { ...s, duration: Math.min(s.duration, 12) };
   };
   const top = mv.sections.reduce((b, s, k) => (s.energy > mv.sections[b].energy ? k : b), 0);
+  // the old master's levels, moved as the piece's mood moves them
+  const [peak, range] = MOODS[mv.mood].dynamics;
   const old = (s: Score) => ({
     ...s,
-    movement: { ...s.movement, mix: { ...s.movement.mix, bus: undefined, peak: -10, range: 18 } },
+    movement: { ...s.movement, mix: { ...s.movement.mix, bus: undefined, peak: -10 + peak, range: 18 + range } },
   });
   return { climax: at(top), intro: at(0), old };
 }

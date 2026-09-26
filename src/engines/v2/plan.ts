@@ -3,12 +3,26 @@
 // point in the song can be reached by planning the movements before it, which costs microseconds each. No
 // audio is involved here.
 
+import { arcPlan, LIFTS, LOUD_OPENINGS, settle, shapeForm, tells } from './arcs.ts';
+import { placeSurprise } from './surprises.ts';
+import { type Mood, moodModes, MOODS, type Motion } from './moods.ts';
 import { hash32, Rng } from './rng.ts';
 import { movementTitle, normalizeSeed, seedNumber } from './seed.ts';
-import { type ProgChord, PROGRESSIONS, ROLE_ENERGY, STYLE_IDS, type StyleDef, STYLES } from './styles.ts';
+import {
+  COLOURS,
+  LAMENTS,
+  type ProgChord,
+  PROGRESSIONS,
+  ROLE_ENERGY,
+  SPACES,
+  STYLE_IDS,
+  type StyleDef,
+  STYLES,
+  VAMPS,
+} from './styles.ts';
 import { barSeconds, Clock } from './tempo.ts';
-import { type ChordSpec, type Key, mod } from './theory.ts';
-import type { Movement, Role, SectionDef, StyleId, Transition } from './types.ts';
+import { type ChordSpec, type Key, MAJOR_MODES, mod } from './theory.ts';
+import type { Arc, Harmony, Movement, Role, SectionDef, Space, StyleId, Surprise, Transition, Tune } from './types.ts';
 
 const MODULATIONS: readonly (readonly [number, number])[] = [
   [7, 4],
@@ -117,19 +131,30 @@ export class Song {
     const recent = this.movements.slice(Math.max(0, m - RECENT), m);
     const sameStyle = recent.filter((x) => x.style === styleId);
 
+    // the feeling first: key, tempo, chords, sound and room follow from it (see moods.ts). Not the last piece's, and
+    // only one the style's modes can carry
+    const moods = style.moods.filter((x) => x !== prev?.mood && moodModes(style.modes, x).length);
+    const mood: Mood = rng.fork('mood').pick(moods.length ? moods : style.moods);
+    const feel = MOODS[mood];
+    const motion: Motion = rng.fork('motion').weighted(style.motions.map((x) => [x, feel.motion[x] ?? 0.25] as const));
+    const modes = moodModes(style.modes, mood);
+
     const keyRng = rng.fork('key');
     // modulate from where the last movement ended, which is above its key if its last chorus lifted
     const heard = prev ? mod(prev.key.tonic + prev.sections[prev.sections.length - 1].shift, 12) : 0;
     const tonic = prev ? mod(heard + keyRng.weighted(MODULATIONS), 12) : keyRng.int(12);
-    let mode = keyRng.weighted(style.modes);
-    if (prev && heard === tonic && prev.key.mode === mode) mode = keyRng.weighted(style.modes);
+    const leaning = modes.length ? modes : style.modes;
+    let mode = keyRng.weighted(leaning);
+    if (prev && heard === tonic && prev.key.mode === mode) mode = keyRng.weighted(leaning);
     const key: Key = { tonic, mode };
 
     const meter = rng.fork('meter').weighted(style.meters);
     // bpm counts quarters; a 6/8 piece sways on its dotted quarters, at three quarters of the style's tempo
     const pulse = meter === '6/8' ? 1.5 * 0.75 : 1;
-    // not the tempo of a piece of the same style (and time) heard lately
-    const tempo = (k: number) => Math.round(pulse * (rng.fork('bpm', k).range(style.bpm[0], style.bpm[1] + 1) - 0.5));
+    // where in the style's range the mood puts it; not the tempo of a piece of the same style (and time) heard lately
+    const [slow, fast] = [style.bpm[0], style.bpm[1] + 1];
+    const tempo = (k: number) =>
+      Math.round(pulse * (slow + (fast - slow) * rng.fork('bpm', k).range(feel.tempo[0], feel.tempo[1]) - 0.5));
     let bpm = tempo(0);
     for (let k = 1; k < 8 && sameStyle.some((x) => x.meter === meter && Math.abs(x.bpm - bpm) < 4); k++) {
       bpm = tempo(k);
@@ -139,15 +164,43 @@ export class Song {
     // a piece rarely ends the way the one before it did
     let transition = rng.fork('transition').weighted(style.transitions);
     if (prev && transition === prev.transition) transition = rng.fork('transition', 1).weighted(style.transitions);
+    // the story the piece tells: not the one the piece before told, and a loud opening only after a piece that
+    // didn't fade away (never the very first)
+    const arcs = style.arcs.filter((a) =>
+      a !== prev?.arc && (!LOUD_OPENINGS.has(a) || (prev !== null && prev.transition !== 'fade'))
+    );
+    // the moment it is remembered by, or none: one its style and mood allow, not the kind either piece before had
+    const lately = this.movements.slice(Math.max(0, m - 2), m).map((x) => x.surprise);
+    const fits = (k: Surprise) =>
+      style.surprises.includes(k) && !lately.includes(k) && (k !== 'halfTime' || meter === '4/4');
+    const kinds = (Object.entries(feel.surprises) as [Surprise, number][]).filter(([k]) => fits(k));
+    // (drawn, then the others it allows in turn, for a form with no room for it)
+    const first = rng.fork('surprise').weighted<Surprise | null>([[null, 0.5], ...kinds]);
+    const surprises = first ? [first, ...kinds.map(([k]) => k).filter((k) => k !== first)] : [];
+    // one drawn, then the others in turn, for a form that can't tell it (see tells())
+    const drawn: Arc = rng.fork('arc family').pick(arcs.length ? arcs : ['climb']);
+    let planned!: ReturnType<typeof planForm>;
+    for (const arc of [drawn, ...arcs.filter((a) => a !== drawn), 'climb'] as const) {
+      // a piece that ends on its peak stops on it, and the room rings
+      const ending = arc === 'lastWord' ? 'pause' : transition;
+      planned = planForm(style, rng.fork('form'), bar, ending, this.length, arc, surprises);
+      if (planned.arc !== arc) continue;
+      transition = ending;
+      break;
+    }
+    const { steps: form, arc: told, surprise: placed } = planned;
     const seed = hash32(this.seed, m);
-    const form = planForm(style, rng.fork('form'), bar, transition, this.length);
     const paced = { style: styleId, bpm, meter, seed, transition, sections: form };
     const sections = form.map((s, k) => ({ ...s, seconds: new Clock(paced, k).duration }));
     const duration = sections.reduce((s, x) => s + x.seconds, 0);
 
     const h = rng.fork('harmony');
-    // now and then a piece changes chords twice as often as its style does, or half as often
-    const barsPerChord = rng.fork('harmonic rhythm').chance(0.25)
+    // a mood may lean to slower or quicker chords; otherwise now and then a piece changes chords twice as often as
+    // its style does, or half as often
+    const hr = rng.fork('harmonic rhythm');
+    const barsPerChord: 1 | 2 = feel.pace && hr.fork('mood').chance(0.6)
+      ? (feel.pace === 'slow' ? 2 : 1)
+      : hr.chance(0.25)
       ? (3 - style.barsPerChord) as 1 | 2
       : style.barsPerChord;
     // at two bars a chord an eight-chord phrase would outlast a section
@@ -159,7 +212,8 @@ export class Song {
         size,
         alt: c.alt,
         shift: c.shift,
-        sus: !c.alt && !c.shift && h.chance(style.sus2) ? 2 : undefined,
+        bass: c.bass,
+        sus: !c.alt && !c.shift && c.bass === undefined && h.chance(style.sus2) ? 2 : undefined,
       }));
     // not the progression of a piece heard lately
     const heardProg = (p: readonly ProgChord[]) =>
@@ -175,28 +229,73 @@ export class Song {
     const bridgeSrc = others.length ? h.pick(others) : alt;
     const bridge = [...bridgeSrc.slice(2), ...bridgeSrc.slice(0, 2)];
 
+    // the harmonic language, as the mood leans (see Harmony): one the style speaks and the mode has. A lament or a
+    // vamp is what the verses play, and often the choruses; a colour chord takes a place in both their loops; a pedal
+    // is the bass's (see sectionChords). The bridge still goes elsewhere.
+    const speaks = (l: Harmony) =>
+      style.languages.includes(l) && (l !== 'lament' || !!LAMENTS[mode]) && (l !== 'colour' || !!COLOURS[mode]);
+    const langs = (Object.entries(feel.languages) as [Harmony, number][]).filter(([l]) => speaks(l));
+    const harmony: Harmony = langs.length ? rng.fork('language').weighted(langs) : 'loop';
+    const lang = h.fork(harmony);
+    const fitted = (ps: readonly ProgChord[][]) => {
+      const f = ps.filter((p) => barsPerChord === 1 || p.length === 4);
+      return f.length ? f : ps;
+    };
+    let [verse, chorus] = [main, lift];
+    if (harmony === 'lament' || harmony === 'vamp') {
+      const own = fitted(harmony === 'lament' ? LAMENTS[mode]! : VAMPS[mode]);
+      verse = lang.pick(own);
+      if (harmony === 'vamp' || lang.chance(0.5)) chorus = lang.pick(own);
+    } else if (harmony === 'colour') {
+      const colour = lang.pick(COLOURS[mode]!);
+      // in the third place of each four chords, or the second where the third is the tonic
+      const tint = (p: readonly ProgChord[]) =>
+        p.map((c, i) => {
+          const place = p[i - (i % 4) + 2]?.deg === 0 ? 1 : 2;
+          return i % 4 === place ? colour : c;
+        });
+      verse = tint(main);
+      chorus = tint(lift);
+    }
+    // an ending that doesn't come home, as the mood allows
+    const ending = rng.fork('ending').chance(feel.open) ? 'open' : 'home';
+
     const t = rng.fork('tone');
     const tone = {
-      bright: t.range(0.8, 1.25),
+      bright: t.range(feel.bright[0], feel.bright[1]),
       detune: t.range(0.75, 1.35),
       fmRatio: t.pick([3.4, 3.5, 2, 1.4, 4, 5.19]),
       vibrato: t.range(0.6, 1.3),
       crackle: t.range(style.crackle[0], style.crackle[1]),
       wow: t.range(style.wow[0], style.wow[1]),
     };
+    // the room it is recorded in, as the mood leans: to the biggest the style allows, or to the closest
+    const leanRoom = (i: number, all: readonly Space[]) =>
+      1 + (feel.space >= 1.15 && i === all.length - 1 ? 2 : 0) + (feel.space <= 0.9 && i === 0 ? 2 : 0);
+    const space = rng.fork('space').weighted(style.spaces.map((sp, i, all): [Space, number] => [sp, leanRoom(i, all)]));
+    const room = SPACES[space];
     const x = rng.fork('mix');
     const mix = {
-      room: x.range(style.room[0], style.room[1]),
-      reverb: x.range(style.reverb[0], style.reverb[1]),
+      room: x.range(room.room[0], room.room[1]),
+      reverb: x.range(style.reverb[0], style.reverb[1]) * room.reverb,
       delayBeats: x.pick(style.delayBeats),
       delayFeedback: x.range(style.delayFeedback[0], style.delayFeedback[1]),
-      delayWet: x.range(style.delayWet[0], style.delayWet[1]),
-      peak: style.dynamics[0],
-      range: style.dynamics[1],
+      delayWet: x.range(style.delayWet[0], style.delayWet[1]) * room.echo,
+      peak: style.dynamics[0] + feel.dynamics[0],
+      range: Math.max(4, style.dynamics[1] + feel.dynamics[1]),
       drums: style.balance[0],
       bass: style.balance[1],
       ...style.record,
+      early: style.record.early * room.early,
     };
+    // the tune, as the mood leans: one the style writes; a riff only in four and in a minor mode (a figure restated
+    // in a major key, or in three, is a carousel)
+    const writes = (t: Tune) =>
+      style.tunes.includes(t) && (t !== 'riff' || (meter === '4/4' && !MAJOR_MODES.has(mode)));
+    const tunes = (Object.entries(feel.tunes) as [Tune, number][]).filter(([t]) => writes(t));
+    const tune: Tune = tunes.length ? rng.fork('tune').weighted(tunes) : 'song';
+    // now and then the band implies the chords with no bed under them (never in a still piece: it would be empty)
+    const texture = motion !== 'still' && rng.fork('texture').chance(style.bare) ? 'bare' : 'bed';
 
     return {
       index: m,
@@ -211,11 +310,20 @@ export class Song {
       firstSection: prev ? prev.firstSection + prev.sections.length : 0,
       startTime: prev ? prev.startTime + prev.duration : 0,
       duration,
-      progressions: { main: toChords(main), lift: toChords(lift), alt: toChords(alt), bridge: toChords(bridge) },
+      progressions: { main: toChords(verse), lift: toChords(chorus), alt: toChords(alt), bridge: toChords(bridge) },
       barsPerChord,
       tone,
       mix,
       transition,
+      arc: told,
+      mood,
+      motion,
+      harmony,
+      ending,
+      tune,
+      space,
+      texture,
+      surprise: placed,
     };
   }
 }
@@ -245,11 +353,16 @@ function planForm(
   bar: number,
   transition: Transition,
   length: Length,
-): Omit<SectionDef, 'seconds'>[] {
-  const steps = rng.pick(style.forms).split(' ').map((s) => {
-    const [role, bars] = s.replace('?', '').split(':');
-    return { role: role as Role, bars: Number(bars), optional: s.endsWith('?') };
-  });
+  wanted: Arc,
+  surprises: readonly Surprise[],
+): { steps: Omit<SectionDef, 'seconds'>[]; arc: Arc; surprise: Surprise | null } {
+  let steps = shapeForm(
+    wanted,
+    rng.pick(style.forms).split(' ').map((s) => {
+      const [role, bars] = s.replace('?', '').split(':');
+      return { role: role as Role, bars: Number(bars), optional: s.endsWith('?') };
+    }),
+  );
   const [lo, hi] = LENGTHS[length].map((x) => x * (style.stretch ?? 1));
   const target = rng.range(lo, hi);
   const seconds = () => steps.reduce((s, x) => s + x.bars * bar, 0);
@@ -318,29 +431,47 @@ function planForm(
     );
   }
 
-  const shift = rng.chance(style.lift) ? rng.pick([1, 2]) : 0;
-  let liftFrom = steps.length;
-  if (shift) {
+  steps = settle(wanted, steps);
+  const arc = tells(wanted, steps);
+  // where a lift would start: the last run of choruses (or drops), in a movement with an earlier one to lift from
+  let liftAt = steps.length;
+  {
     const peak: Role = steps.some((s) => s.role === 'chorus') ? 'chorus' : 'drop';
     let k = steps.length - 1;
     while (k >= 0 && steps[k].role !== peak) k--;
     while (k > 0 && steps[k - 1].role === peak) k--;
     // a drop lifts together with the build that leads into it
     if (peak === 'drop' && steps[k - 1]?.role === 'build') k--;
-    // only a movement with an earlier chorus (or drop) to lift from
-    if (k > 0 && steps.slice(0, k).some((s) => s.role === peak)) liftFrom = k;
+    if (k > 0 && steps.slice(0, k).some((s) => s.role === peak)) liftAt = k;
   }
+  const shift = rng.chance(style.lift) && LIFTS.has(arc) ? rng.pick([1, 2]) : 0;
+  const liftFrom = shift ? liftAt : steps.length;
 
   // a bridge sometimes goes away to the key a fourth up (the subdominant), and the piece comes home after it
   const away = rng.fork('away').chance(style.away) ? 5 : 0;
 
-  const energy = arc(steps, rng.fork('arc').pick(BURNS));
+  const { energy, treatment } = arcPlan(arc, steps, rng.fork('arc').pick(BURNS));
   const out: Omit<SectionDef, 'seconds'>[] = steps.map((s, i) => ({
     role: s.role,
     bars: s.bars,
     energy: energy[i],
     shift: (i >= liftFrom ? shift : 0) + (s.role === 'bridge' ? away : 0),
+    ...(treatment[i] ? { treatment: treatment[i] } : {}),
   }));
+  // the first of the surprises it can place: a key jump lifts the last choruses a major third (the chromatic
+  // mediant, the film composer's lift) where a lift could be; an arc that already quiets its later parts has no room
+  // for a sudden hush or a part left alone
+  const placed = surprises.find((k) => {
+    if (k === 'keyJump') {
+      if (!LIFTS.has(arc) || liftAt >= steps.length) return false;
+      for (let i = liftAt; i < out.length; i++) {
+        out[i] = { ...out[i], shift: 4 + (out[i].role === 'bridge' ? away : 0) };
+      }
+      return true;
+    }
+    if ((arc === 'early' || arc === 'dissolve') && (k === 'subito' || k === 'alone')) return false;
+    return placeSurprise(k, out) !== null;
+  }) ?? null;
   // an ending that fades or pauses is followed by a rest, so it's heard as an ending: about a bar after a
   // fade, a little longer after a pause (the outro's last chord rings out into it first)
   if (transition === 'pause' || transition === 'fade') {
@@ -349,38 +480,10 @@ function planForm(
     const bars = seconds / bar;
     out.push({ role: 'rest', bars, energy: ROLE_ENERGY.rest, shift: out[out.length - 1].shift });
   }
-  return out;
+  return { steps: out, arc, surprise: placed };
 }
-/**
- * How a movement's arc grows (the power of its position): most climb steadily, some reach near their height
- * early and hold it, some smoulder and burn late.
- */
+/** How a climb grows (see arcs.ts): most steadily, some near their height early, some smouldering and burning late. */
 const BURNS = [0.6, 1, 1, 1.8];
-
-/**
- * The movement's arc as each section's energy (0..1, the peak 1): it starts low, every return of a part is
- * bigger than the one before, breaks and bridges fall back, and the last chorus or drop is the peak. Loudness
- * follows it (see the style's dynamics): a piece builds instead of sitting at one level.
- */
-function arc(steps: readonly { role: Role; bars: number }[], burn = 1): number[] {
-  const total = steps.reduce((n, s) => n + s.bars, 0);
-  let at = 0;
-  const raw = steps.map((s) => {
-    const pos = (at / total) ** burn;
-    at += s.bars;
-    const calm = ['intro', 'outro', 'rest', 'break', 'bridge'].includes(s.role);
-    return ROLE_ENERGY[s.role] + (calm ? 0.1 : 0.35) * pos;
-  });
-  // a run of builds is one crescendo: from under a build's usual energy to over it
-  for (let i = 0; i < steps.length; i++) {
-    if (steps[i].role !== 'build' || steps[i - 1]?.role === 'build') continue;
-    let j = i;
-    while (steps[j + 1]?.role === 'build') j++;
-    for (let k = i; k <= j; k++) raw[k] += j > i ? -0.12 + (0.3 * (k - i)) / (j - i) : 0;
-  }
-  const top = Math.max(...raw);
-  return raw.map((e) => e / top);
-}
 
 export const sectionDuration = (mv: Movement, local: number) => mv.sections[local].seconds;
 export function sectionOffset(mv: Movement, local: number): number {

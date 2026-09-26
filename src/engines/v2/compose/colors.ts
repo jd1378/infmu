@@ -2,6 +2,7 @@
 // and then a wildcard) laid over a style's own arrangement. It joins the band as the piece develops and stays:
 // a movement's band grows, it doesn't change.
 
+import { bounces } from '../moods.ts';
 import type { StyleId } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { choir, play } from './helpers.ts';
@@ -12,6 +13,7 @@ import {
   arp,
   arpNotes,
   guitarVoicing,
+  moves,
   organChords,
   padChords,
   percBar,
@@ -56,6 +58,7 @@ const COLORS: Record<ColorId, Color> = {
       bars(ctx, (b) => {
         const ns = arpNotes(ctx.chordAt(b), 67);
         [0, 2, 1, 3, 2, 4, 1, 3].slice(0, ctx.spb / 2).forEach((i, k) =>
+          moves(ctx, 2 * k) &&
           ctx.push({
             i: 'mallet',
             t: ctx.barAt(b, 2 * k),
@@ -72,6 +75,8 @@ const COLORS: Record<ColorId, Color> = {
       bars(ctx, (b) => {
         const ns = arpNotes(ctx.chordAt(b), 60);
         for (let s = 0; s < ctx.spb; s++) {
+          // sixteenths of a high mallet are a music box: only joy runs that fast (see moods.ts)
+          if (!moves(ctx, s) || (s % 2 && !bounces(ctx.mv.mood))) continue;
           const g = ctx.runBar(b) * ctx.spb + s;
           ctx.push({
             i: 'mallet',
@@ -190,14 +195,20 @@ function signature(ctx: Ctx): ColorId {
 
 /**
  * How loud the colour plays in a section, or 0. It's something the piece grows into, not wallpaper: it comes in
- * when a verse or a chorus returns, and has its moment in the bridge or the break.
+ * when a verse or a chorus returns, and has its moment in the bridge or the break. In some pieces it is the voice
+ * the piece is remembered by: it opens the piece, closes it, and plays from the first verse on.
  */
 function level(ctx: Ctx): number {
+  const featured = ctx.mrng.fork('featured').chance(0.35);
   switch (ctx.sec.role) {
+    case 'intro':
+      return featured ? 0.5 : 0;
+    case 'outro':
+      return featured ? 0.45 : 0;
     case 'verse':
-      return ctx.returning ? 0.45 : 0;
+      return ctx.returning ? 0.45 : featured ? 0.4 : 0;
     case 'chorus':
-      return ctx.returning ? 0.4 : 0;
+      return ctx.returning ? 0.4 : featured ? 0.35 : 0;
     case 'drop':
       return ctx.returning ? 0.35 : 0;
     case 'bridge':
@@ -211,5 +222,12 @@ function level(ctx: Ctx): number {
 export function colours(ctx: Ctx): void {
   const c = COLORS[signature(ctx)];
   const v = level(ctx);
-  if (v > 0 && !(c.busy && ctx.sec.energy < 0.4)) c.write(ctx, v);
+  if (v <= 0 || (c.busy && ctx.sec.energy < 0.4)) return;
+  const from = ctx.events.length;
+  c.write(ctx, v);
+  // opening a piece, it comes in on the intro's second bar: a piece opens quietly (see opening())
+  if (ctx.role !== 'intro') return;
+  const kept = ctx.events.slice(from).filter((e) => e.t >= ctx.bar - 1e-6);
+  ctx.events.length = from;
+  ctx.events.push(...kept);
 }

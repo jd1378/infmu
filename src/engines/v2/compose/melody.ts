@@ -7,14 +7,14 @@
 
 import { hash32, Rng } from '../rng.ts';
 import { type Key, mod, pc } from '../theory.ts';
-import { type Meter, type Note, stepsPerBar, type StyleId } from '../types.ts';
+import { type Meter, type Note, stepsPerBar, type StyleId, type Tune } from '../types.ts';
 import type { ChordSlot, Ctx } from './context.ts';
 
 // ------------------------------------------------------------------ vocabulary
 
 /** One bar of melodic rhythm: [onset, length] in 16ths. A whole rhythmic idea, not per-beat dice. */
 type Cell = readonly (readonly [on: number, len: number])[];
-type Shape = 'arch' | 'leap' | 'wave' | 'fall';
+type Shape = 'arch' | 'leap' | 'wave' | 'fall' | 'descent';
 
 const SPARSE: Cell[] = [
   [[0, 8], [8, 8]],
@@ -102,6 +102,8 @@ export interface Profile {
   meter?: Meter;
   /** Scale degrees (mod 7) the line steps past: a pentatonic flavour (see RealizeOpts.avoid). */
   avoid?: readonly number[];
+  /** A reciting tune: its spare notes dwell on the note they're on rather than turning round it. */
+  recite?: boolean;
 }
 
 const LYRIC_SHAPES = [['arch', 4], ['leap', 2], ['wave', 1]] as const;
@@ -228,6 +230,32 @@ export function character(rng: Rng, p: Profile, mode: Key['mode']): Profile {
 }
 
 /**
+ * A movement's tune (see Tune) in its style's idiom: a lament falls from a high note by step and sighs onto its chord
+ * tones; a riff is a one-bar figure restated; a recitation stays near one note and repeats it; a fanfare calls in
+ * fourths, fifths and octaves. A song, or no tune, is the style's own.
+ */
+export function tuned(p: Profile, tune: Tune): Profile {
+  switch (tune) {
+    case 'lament':
+      return {
+        ...p,
+        shapes: [['descent', 3], ['fall', 2]],
+        leaps: [2],
+        repeat: Math.min(p.repeat, 0.06),
+        appoggiaturas: Math.max(1, p.appoggiaturas),
+      };
+    case 'riff':
+      return { ...p, head: RIFF, riff: true, climb: [3, 5], leaps: [3, 4], shapes: [['arch', 2], ['wave', 2]] };
+    case 'recitation':
+      return { ...p, climb: [1, 2], leaps: [1], repeat: 0.35, recite: true, shapes: [['wave', 2], ['arch', 1]] };
+    case 'fanfare':
+      return { ...p, climb: [5, 7], leaps: [3, 4, 7], repeat: 0.05, shapes: [['leap', 4], ['arch', 1]] };
+    default:
+      return p;
+  }
+}
+
+/**
  * A style's idiom in three: the same share of long, sparse notes against lyrical ones, in the time's own cells.
  * A riff keeps four (trance and acid stay in four).
  */
@@ -285,7 +313,7 @@ function shift(rhythm: Motif['rhythm'], by: number): Motif['rhythm'] {
  * on a dip before a rise or an overshoot at the end of a fall, a third or a leap only when it must. Returns the
  * k - 1 notes between a and b.
  */
-function fill(rng: Rng, a: number, b: number, k: number, repeat: number, ceil = Infinity): number[] {
+function fill(rng: Rng, a: number, b: number, k: number, repeat: number, ceil = Infinity, recite = false): number[] {
   const d = b - a;
   const dir = Math.sign(d) || (a >= ceil || rng.chance(0.6) ? -1 : 1);
   let ivs: number[];
@@ -293,7 +321,7 @@ function fill(rng: Rng, a: number, b: number, k: number, repeat: number, ceil = 
     const run: number[] = new Array(Math.abs(d)).fill(dir);
     let extra = k - Math.abs(d);
     const turns: number[] = [];
-    for (; extra >= 2; extra -= 2) turns.push(-1, 1);
+    for (; extra >= 2; extra -= 2) turns.push(...(recite && rng.chance(0.7) ? [0, 0] : [-1, 1]));
     if (extra === 1) {
       if (rng.chance(repeat) || !run.length) turns.push(0);
       else if (dir > 0) run.splice(0, 1, -1, 2); // dip, then a third up
@@ -329,9 +357,10 @@ export function makeMotif(rng: Rng, p: Profile, tail: 'short' | 'long' = 'short'
   const shape = rng.weighted(p.shapes);
   const leap = rng.pick(p.leaps);
   const px = rng.range(0.4, 0.65);
-  // the peak: early for a leap (the leap is the hook), otherwise past the middle, on a longer note if it can
-  let peak = 1;
-  if (shape !== 'leap') {
+  // the peak: early for a leap (the leap is the hook), the first note of a descent, otherwise past the middle, on a
+  // longer note if it can
+  let peak = shape === 'descent' ? 0 : 1;
+  if (shape !== 'leap' && shape !== 'descent') {
     let best = Infinity;
     rhythm.forEach((r, i) => {
       const dist = Math.abs(r.on / (2 * spb) - px) - (r.len >= 4 ? 0.06 : 0);
@@ -346,7 +375,11 @@ export function makeMotif(rng: Rng, p: Profile, tail: 'short' | 'long' = 'short'
     shape === 'leap' ? Math.min(7, leap + lift) : Math.min(climb, Math.ceil(peak * 1.5)) + lift,
     room,
   );
-  const endV = shape === 'fall' ? -rng.pick([1, 2, 3]) : Math.min(h - 1, endPick);
+  const endV = shape === 'fall'
+    ? -rng.pick([1, 2, 3])
+    : shape === 'descent'
+    ? h - rng.pick([3, 4, 5])
+    : Math.min(h - 1, endPick);
   const anchors = new Map<number, number>([[0, 0], [peak, h], [n - 1, endV]]);
   const down = rhythm.findIndex((r) => r.on >= spb);
   if (down > peak + 1 && down < n - 2) anchors.set(down, Math.round((h + endV) / 2)); // the way down
@@ -360,10 +393,15 @@ export function makeMotif(rng: Rng, p: Profile, tail: 'short' | 'long' = 'short'
   for (const i of idx) line[i] = anchors.get(i)!;
   for (let s = 1; s < idx.length; s++) {
     const [i, j] = [idx[s - 1], idx[s]];
-    fill(rng, line[i], line[j], j - i, p.repeat, h - 1).forEach((v, q) => (line[i + 1 + q] = v));
+    fill(rng, line[i], line[j], j - i, p.repeat, h - 1, p.recite).forEach((v, q) => (line[i + 1 + q] = v));
   }
   const steps = line.map((v, i) => (i ? v - line[i - 1] : 0));
-  const start = shape === 'leap' ? rng.pick([0, 0, 2]) : rng.pick([0, 1, 2, 2]);
+  // (a descent starts high in the chord, with room to fall)
+  const start = shape === 'leap'
+    ? rng.pick([0, 0, 2])
+    : shape === 'descent'
+    ? rng.pick([2, 2, 1])
+    : rng.pick([0, 1, 2, 2]);
   return { rhythm, steps, start, seed: rng.seed, profile: p };
 }
 
@@ -709,7 +747,8 @@ export function phrase(
     const [motif, rel, planned] = plan[k];
     const ending = k === count - 1 && cadence ? cadence : planned;
     const step = (fromBar + 2 * st * k) * ctx.spb;
-    const ns = realize(ctx, motif, { ...o, step }, anchor === undefined ? undefined : anchor + rel, ending);
+    const at = { ...o, step, center: o.center + ctx.register, lo: o.lo + ctx.register, hi: o.hi + ctx.register };
+    const ns = realize(ctx, motif, at, anchor === undefined ? undefined : anchor + rel, ending);
     if (anchor === undefined && ns.length) anchor = ns[0].deg;
     placed.push(...ns);
   }

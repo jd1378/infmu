@@ -1,3 +1,4 @@
+import type { Mood, Motion } from './moods.ts';
 import type { ChordSpec, Key } from './theory.ts';
 
 export type StyleId = 'drift' | 'haze' | 'pulse' | 'rise' | 'cathedral' | 'acid' | 'garden' | 'nocturne' | 'ember';
@@ -19,6 +20,44 @@ export type Role =
 export type Transition = 'fade' | 'swell' | 'stop' | 'pause';
 
 /**
+ * The story a movement's loudness and fullness tell (see arcs.ts): `climb`, quiet to a peak near the end; `early`,
+ * a peak near the middle and an afterglow; `plateau`, up soon and held, with no single climax; `cold`, opening on
+ * its big part; `dissolve`, starting full and letting go; `lastWord`, ending on its peak with no outro.
+ */
+export type Arc = 'climb' | 'early' | 'plateau' | 'cold' | 'dissolve' | 'lastWord';
+
+/**
+ * A movement's harmonic language: `loop`, its style's progressions; `pedal`, the bass holding the tonic under them
+ * (the fifth under a build); `lament`, a bass walking down by step; `vamp`, the mode's own one or two chords;
+ * `colour`, one chord from outside the mode as its signature.
+ */
+export type Harmony = 'loop' | 'pedal' | 'lament' | 'vamp' | 'colour';
+
+/**
+ * What a movement's tune is: `song`, a hook built round one climax (the style's own); `lament`, lines that fall from
+ * a high note; `riff`, a figure restated as the chords move under it; `recitation`, a reciting tone and its
+ * neighbours, the interest in the rhythm; `fanfare`, a call of fourths, fifths and octaves; `none`, no tune at all
+ * (the band and its colour are the piece).
+ */
+export type Tune = 'song' | 'lament' | 'riff' | 'recitation' | 'fanfare' | 'none';
+
+/**
+ * The one moment a movement is remembered by (see surprises.ts): `keyJump`, its last choruses up a major third;
+ * `subito`, a returning chorus suddenly hushed before the last; `alone`, a verse or bridge left to the tune over
+ * the bed; `pause`, the band stopping for a bar in a chorus; `halfTime`, its peak's drums in half time.
+ */
+export type Surprise = 'keyJump' | 'subito' | 'alone' | 'pause' | 'halfTime';
+
+/** The room a movement is recorded in: close and dry (under a second), a room, a hall, a cathedral (six seconds). */
+export type Space = 'close' | 'room' | 'hall' | 'cathedral';
+
+/**
+ * How fully a section is played, beyond its role: `hushed`, without the rhythm section (drums, bass, risers, the
+ * overdriven wall); `bare`, only the tune over its sustained bed. Absent, the full band.
+ */
+export type Treatment = 'hushed' | 'bare';
+
+/**
  * A movement's time: four beats, a waltz's three, or two lilting beats of three eighths each. Both triple times
  * have twelve 16ths in a bar; the movement's bpm counts quarter notes in all three.
  */
@@ -34,6 +73,9 @@ export interface SectionDef {
   energy: number;
   /** Semitones above the movement's key: the lifted final choruses. */
   shift: number;
+  treatment?: Treatment;
+  /** A surprise played inside the section: the band stopping for a bar, or its drums in half time. */
+  surprise?: 'pause' | 'halfTime';
   /** How long the bars last as the band plays them (see tempo.ts): what the section's clock makes of them. */
   seconds: number;
 }
@@ -101,6 +143,18 @@ export interface Movement {
   tone: Tone;
   mix: Mix;
   transition: Transition;
+  arc: Arc;
+  /** The feeling it is written in and how busy its accompaniment is (see moods.ts). */
+  mood: Mood;
+  motion: Motion;
+  harmony: Harmony;
+  /** Whether it comes home at its end, to the tonic, or ends open, on a chord that doesn't resolve. */
+  ending: 'home' | 'open';
+  tune: Tune;
+  space: Space;
+  /** Whether its chords are held under it by a bed (pads), or left to the band to imply. */
+  texture: 'bed' | 'bare';
+  surprise: Surprise | null;
 }
 
 // ------------------------------------------------------------------ score events
@@ -247,6 +301,8 @@ export interface ChordSpan {
   d: number;
   name: string;
   pcs: number[];
+  /** The pitch class the bass plays: the root, or a slash chord's or a pedal's bass. */
+  bass: number;
 }
 
 export interface Score {

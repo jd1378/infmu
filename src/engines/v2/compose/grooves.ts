@@ -159,6 +159,16 @@ function fillOf(ctx: Ctx, g: Groove, full: boolean, rb: number, layer: boolean):
   return out;
 }
 
+/** A bar's hats and shakers on the eighths only. */
+function eighths(p: GrooveBar): GrooveBar {
+  const out = { ...p };
+  for (const lane of ['hat', 'shaker'] as const) {
+    const pat = out[lane];
+    if (pat) out[lane] = [...pat].map((c, s) => (s % 2 ? '.' : c)).join('');
+  }
+  return out;
+}
+
 /**
  * Bar `b` of the movement's groove in the current section. Verses, prechoruses and outros play it light,
  * choruses, drops and solos full (with the answer bar on every second bar). A returning part adds the groove's
@@ -171,14 +181,11 @@ export function playGroove(ctx: Ctx, g: Groove, b: number, o: GroovePlay): void 
   const layer = ctx.role !== 'solo' && (ctx.returning || rb >= 8);
   const fill = rb % 8 === 7 && (full || ctx.role === 'verse');
   const kit = { ...o.kit, ...g.kit, lag: g.lag };
-  grooveBar(
-    ctx,
-    b,
-    fill ? fillOf(ctx, g, full, rb, layer) : grooveLanes(g, full, rb, layer, false),
-    kit,
-    o.gain ?? 1,
-    o.perc ?? 0.6,
-  );
+  // a still piece's drums play only its big parts; a flowing one's hats and shakers play eighths
+  const lanes = fill ? fillOf(ctx, g, full, rb, layer) : grooveLanes(g, full, rb, layer, false);
+  if (ctx.mv.motion !== 'still' || full) {
+    grooveBar(ctx, b, ctx.mv.motion === 'flowing' ? eighths(lanes) : lanes, kit, o.gain ?? 1, o.perc ?? 0.6);
+  }
   if (o.withBass === false) return;
   const bass = ctx.role === 'prechorus' ? g.bassFull : grooveBass(g, full, rb, fill);
   bassFigure(ctx, b, bass, full ? g.bassKind ?? o.bass : o.bass, o.bassGain);

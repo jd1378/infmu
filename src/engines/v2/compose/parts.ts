@@ -1,7 +1,8 @@
 // Part writers shared by the styles: drum grids, basslines, chord beds, arpeggios and transition effects.
 // Each writes events into the section's context; the styles decide which ones play when.
 
-import { mod, voiceLead } from '../theory.ts';
+import { bounces } from '../moods.ts';
+import { MAJOR_MODES, mod, voiceLead } from '../theory.ts';
 import type { Rng } from '../rng.ts';
 import type { AcidNote, BassKind, HatKind, KickKind, Note, PadKind, SnareKind, StringKind, TomKind } from '../types.ts';
 import { type ChordSlot, type Ctx, PAD_HI, PAD_LO, sectionChords } from './context.ts';
@@ -172,9 +173,9 @@ export function tomFill(ctx: Ctx, bar: number, slot: ChordSlot, v = 0.8, k?: Tom
 
 // ------------------------------------------------------------------ bass
 
-/** Folds a chord root into the bass register (E1..G2). */
+/** The bass note of a chord (its root, or the bass it asks for) folded into the bass register (E1..G2). */
 export function bassRoot(ctx: Ctx, slot: ChordSlot): number {
-  let r = ctx.root(slot);
+  let r = ctx.bass(slot);
   while (r > 43) r -= 12;
   while (r < 28) r += 12;
   return r;
@@ -199,10 +200,38 @@ export function bassFigure(ctx: Ctx, bar: number, hits: readonly BassHit[], k: B
   const slot = ctx.chordAt(bar);
   const root = bassRoot(ctx, slot);
   const nextRoot = bar + 1 < ctx.bars ? bassRoot(ctx, ctx.chordAt(bar + 1)) : root;
-  for (const [s, len, iv, v] of hits) {
+  for (const [s, len, iv, v] of asMoved(ctx, hits)) {
     const n = iv === 'A' ? (nextRoot === root ? root + 7 : nextRoot + (nextRoot > root ? -1 : 1)) : root + iv;
     ctx.push({ i: 'bass', t: ctx.barAt(bar, s), d: len * ctx.s16 * 0.92, n, v: v * gain, k });
   }
+}
+
+/**
+ * Whether the accompaniment plays at step `s` of a bar, at the movement's motion (see moods.ts): a still piece's moves
+ * only on the beats, a flowing one's in eighths, a driving one's as written. A pattern keeps its notes where it
+ * still plays: the same figure, fewer notes.
+ */
+export function moves(ctx: Ctx, s: number): boolean {
+  const m = ctx.mv.motion;
+  return m === 'driving' || (m === 'flowing' ? s % 2 === 0 : ctx.onBeat(s));
+}
+
+/**
+ * A bass figure as the piece's motion and mood let it be played. Still: the root held through the bar. Otherwise
+ * its hits on the motion's grid; and unless the mood is joy, no oom-pah: on the beats the root, not the root and
+ * fifth by turns, and in a major key in three the root held through the bar (the carousel's bass, see moods.ts).
+ */
+function asMoved(ctx: Ctx, hits: readonly BassHit[]): readonly BassHit[] {
+  if (!hits.length) return hits;
+  const joy = bounces(ctx.mv.mood);
+  if (ctx.mv.motion === 'still' || (!joy && ctx.mv.meter !== '4/4' && MAJOR_MODES.has(ctx.key.mode))) {
+    return [[0, ctx.spb, 0, Math.max(...hits.map((h) => h[3]))]];
+  }
+  const kept = hits.filter(([s]) => moves(ctx, s));
+  if (joy) return kept;
+  const beats = kept.filter(([s]) => ctx.onBeat(s));
+  if (!beats.some((h) => h[2] === 0) || !beats.some((h) => h[2] === 7)) return kept;
+  return kept.map((h) => (ctx.onBeat(h[0]) && h[2] === 7 ? [h[0], h[1], 0, h[3]] : h));
 }
 
 export const EIGHTHS: readonly BassHit[] = [0, 2, 4, 6, 8, 10, 12, 14].map((s) => [s, 2, 0, s % 4 ? 0.8 : 1] as const);
@@ -219,6 +248,8 @@ export interface PadOpts {
 }
 
 export function padChords(ctx: Ctx, k: PadKind, o: PadOpts): void {
+  // a piece with a bare texture has no bed: the band implies its chords
+  if (ctx.mv.texture === 'bare') return;
   const bright = ctx.mv.tone.bright;
   ctx.chords.forEach((slot, i) => {
     const a = Math.max(slot.bar, o.fromBar ?? 0);
@@ -295,6 +326,7 @@ export function arp(
   const ns = arpNotes(slot, o.from ?? 62);
   const rate = o.rate ?? 1;
   for (let s = 0; s < ctx.spb; s += rate) {
+    if (!moves(ctx, s)) continue;
     // a global step counter keeps the 3-note hemiola drifting across bar lines
     const g = bar * ctx.spb + s + ctx.local * 997;
     const k = s / rate;
@@ -428,7 +460,7 @@ export function pickNotes(
 ): void {
   for (let s = 0, j = 0; s < ctx.spb; s += every, j++) {
     const i = idx[j % idx.length];
-    if (i < 0) continue;
+    if (i < 0 || !moves(ctx, s)) continue;
     const n = ns[Math.min(ns.length - 1, i)];
     ctx.push({
       i: 'string',
@@ -495,7 +527,11 @@ export function strumBar(ctx: Ctx, bar: number, ns: readonly number[], k: String
     : ctx.mv.meter === '3/4'
     ? [[0, 1, false], [4, 0.75, true], [8, 0.8, false]]
     : [[0, 1, false], [4, 0.6, true], [6, 0.85, false], [10, 0.6, true]];
-  for (const [s, g, up] of plan) strum(ctx, ctx.barAt(bar, s), up ? ns.slice(2) : ns, k, v * g, undefined, up);
+  // a still piece strums once a bar, a flowing one only down
+  const played = plan.filter(([s, , up]) =>
+    ctx.mv.motion === 'driving' || (ctx.mv.motion === 'flowing' ? !up : s === 0)
+  );
+  for (const [s, g, up] of played) strum(ctx, ctx.barAt(bar, s), up ? ns.slice(2) : ns, k, v * g, undefined, up);
 }
 
 /** Fingerpicking or an arpeggio on a plucked string instrument, one bar, from a pattern of voicing indices. */
@@ -511,7 +547,7 @@ export function pick(
   const ns = guitarVoicing(ctx.chordAt(bar), low);
   for (let s = 0, j = 0; s < ctx.spb; s += every, j++) {
     const i = idx[j % idx.length];
-    if (i < 0) continue;
+    if (i < 0 || !moves(ctx, s)) continue;
     ctx.push({
       i: 'string',
       t: ctx.barAt(bar, s),
@@ -534,11 +570,14 @@ export function pianoBar(ctx: Ctx, bar: number, fig: PianoFigure, v: number): vo
   const slot = ctx.chordAt(bar);
   const root = ctx.root(slot) + 12 > 55 ? ctx.root(slot) : ctx.root(slot) + 12;
   const up = arpNotes(slot, root);
+  // the left hand's lowest note is the bass the chord asks for (a lament's walking bass, a pedal)
+  up[0] = root - mod(root - ctx.bass(slot), 12);
   const t = (s: number) => ctx.barAt(bar, s);
   const shaped = (s: number, i: number) =>
     s === 0 ? 1 : ctx.strong(s) && i === 0 ? 0.85 : 0.64 + (0.22 * i) / Math.max(1, up.length - 1);
   const figure = (steps: readonly number[], idx: readonly number[], d: number) =>
     steps.forEach((s, k) => {
+      if (!moves(ctx, s)) return;
       const i = idx[k % idx.length] % up.length;
       ctx.push({ i: 'piano', t: t(s), d: d * ctx.s16, n: [up[i]], v: v * shaped(s, i) });
     });
