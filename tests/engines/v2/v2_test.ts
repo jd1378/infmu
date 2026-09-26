@@ -205,14 +205,16 @@ Deno.test('a movement builds: it starts low and peaks in its last chorus or drop
 });
 
 Deno.test('every chorus of a movement restates the same hook on the same voice', () => {
-  const lead = (s: ReturnType<typeof composeSection>) => {
+  const voiceOf = (e: Ev) => `${e.i}:${'k' in e ? e.k : ''}`;
+  // the lead of the first chorus (never doubled) is the voice later choruses must keep
+  const lead = (s: ReturnType<typeof composeSection>, keep?: string) => {
     const mel = s.events.filter(isMelody);
-    const first = mel[0];
-    if (!first) return null;
-    const voice = `${first.i}:${'k' in first ? first.k : ''}`;
-    const notes = mel.filter((e) => `${e.i}:${'k' in e ? e.k : ''}` === voice)
+    if (!mel.length) return null;
+    const voice = keep && mel.some((e) => voiceOf(e) === keep) ? keep : voiceOf(mel[0]);
+    const notes = mel.filter((e) => voiceOf(e) === voice)
       .flatMap((e) => ('ns' in e ? e.ns.map((n) => [n.t, n.n]) : [[e.t, (e as { n: number }).n]]))
-      .filter(([t]) => t < s.duration / 2)
+      // half a 16th before halfway: written notes sit on the grid, performed ones move less than that
+      .filter(([t]) => t < s.duration / 2 - 60 / s.bpm / 8)
       .sort((a, b) => a[0] - b[0]);
     // the first half as intervals (independent of a key lift; the ending may turn towards what comes next)
     return { voice, shape: notes.map((x, i, a) => (i ? x[1] - a[i - 1][1] : 0)).join(',') };
@@ -221,8 +223,14 @@ Deno.test('every chorus of a movement restates the same hook on the same voice',
   for (const style of STYLE_IDS) {
     const song = new Song(`hook-${style}`, [style]);
     const mv = song.movement(0);
-    const hooks = mv.sections.map((s, k) => [s, k] as const).filter(([s]) => s.role === 'chorus' || s.role === 'drop')
-      .map(([, k]) => lead(composeSection(song, mv.firstSection + k))).filter((h) => h !== null);
+    const choruses = mv.sections.map((s, k) => [s, k] as const).filter(([s]) =>
+      s.role === 'chorus' || s.role === 'drop'
+    );
+    const hooks: { voice: string; shape: string }[] = [];
+    for (const [, k] of choruses) {
+      const h = lead(composeSection(song, mv.firstSection + k), hooks[0]?.voice);
+      if (h) hooks.push(h);
+    }
     for (const h of hooks.slice(1)) {
       assertEquals([h.voice, h.shape], [hooks[0].voice, hooks[0].shape], `${style}: a chorus changed its tune`);
       checked++;
@@ -318,4 +326,25 @@ Deno.test('a movement opens quietly: no hit or bell on its first beat', () => {
     }
   }
   assert(landings > 0, 'no swell hand-over found');
+});
+
+Deno.test('played parts are performed; the kick, the synth bass and the arpeggiator keep the grid', () => {
+  const song = new Song('performance', ['pulse']);
+  const mv = song.movement(0);
+  const k = mv.sections.findIndex((s) => s.role === 'chorus');
+  const s = composeSection(song, mv.firstSection + k);
+  const s16 = 60 / s.bpm / 4;
+  // swing moves odd 16ths on purpose: measure against even 16ths (8ths) only
+  const onGrid = (t: number) => Math.abs(t / (2 * s16) - Math.round(t / (2 * s16))) * 2 * s16 < 1e-6;
+  const onsets = (f: (e: Ev) => boolean) =>
+    s.events.filter(f).flatMap((e) => ('ns' in e ? e.ns.map((n) => n.t) : [e.t]));
+  const played = onsets((e) => ['string', 'piano', 'mallet', 'lead', 'wind'].includes(e.i));
+  assert(played.length > 0 && played.filter(onGrid).length < played.length * 0.2, 'played parts are machine-exact');
+  // synthwave's bass is a synth, sequenced like its arpeggios
+  const tight = onsets((e) => e.i === 'kick' || e.i === 'bass' || e.i === 'pluck');
+  assert(tight.length > 0 && tight.every((t) => onGrid(t) || onGrid(t + s16)), 'a sequenced part drifted');
+  const velocities = new Set(
+    s.events.filter((e) => ['string', 'piano', 'mallet'].includes(e.i)).map((e) => (e as { v: number }).v.toFixed(3)),
+  );
+  assert(velocities.size > 20, `only ${velocities.size} different velocities in the played parts`);
 });

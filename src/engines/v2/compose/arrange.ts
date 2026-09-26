@@ -6,6 +6,7 @@ import type { StyleId } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { colours } from './colors.ts';
 import { opening, transition } from './parts.ts';
+import { perform } from './perform.ts';
 import { garden, haze, nocturne } from './styles/acoustic.ts';
 import { cathedral, drift, ember } from './styles/atmospheric.ts';
 import { acid, pulse, rise } from './styles/electronic.ts';
@@ -27,4 +28,5 @@ export function arrange(ctx: Ctx): void {
   ARRANGERS[ctx.mv.style](ctx);
   colours(ctx);
   transition(ctx);
+  perform(ctx);
 }
