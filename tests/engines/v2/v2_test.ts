@@ -1,12 +1,15 @@
 import { assert, assertAlmostEquals, assertEquals, assertNotEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v2/compose/index.ts';
 import { Ctx, sectionKey } from '../../../src/engines/v2/compose/context.ts';
+import { perform } from '../../../src/engines/v2/compose/perform.ts';
 import { Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
 import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
 import { snare } from '../../../src/engines/v2/synth/instruments.ts';
 import { melodyOffset, renderScore } from '../../../src/engines/v2/synth/render.ts';
+import { string } from '../../../src/engines/v2/synth/strings.ts';
+import { wind } from '../../../src/engines/v2/synth/voice.ts';
 import { Clock, tempoAt } from '../../../src/engines/v2/tempo.ts';
 import { MODES, pc } from '../../../src/engines/v2/theory.ts';
 import { type Ev, isMelody, type StyleId, TAKES } from '../../../src/engines/v2/types.ts';
@@ -214,11 +217,16 @@ Deno.test('every chorus of a movement restates the same hook on the same voice',
     const mel = s.events.filter(isMelody);
     if (!mel.length) return null;
     const voice = keep && mel.some((e) => voiceOf(e) === keep) ? keep : voiceOf(mel[0]);
-    const notes = mel.filter((e) => voiceOf(e) === voice)
-      .flatMap((e) => ('ns' in e ? e.ns.map((n) => [n.t, n.n]) : [[e.t, (e as { n: number }).n]]))
-      // half a 16th before halfway: written notes sit on the grid, performed ones move less than that
-      .filter(([t]) => t < s.duration / 2 - 60 / s.bpm / 8)
+    const all = mel.filter((e) => voiceOf(e) === voice)
+      .flatMap((
+        e,
+      ) => ('ns' in e ? e.ns.map((n) => [n.t, n.n]) : [[e.t, [(e as { n: number | number[] }).n].flat()[0]]]))
       .sort((a, b) => a[0] - b[0]);
+    const notes = all
+      // a grace note leaning into the next is how a return is played, not what it plays
+      .filter(([t], i) => !(all[i + 1] && all[i + 1][0] - t < 0.1))
+      // half a 16th before halfway: written notes sit on the grid, performed ones move less than that
+      .filter(([t]) => t < s.duration / 2 - 60 / s.bpm / 8);
     // the first half as intervals (independent of a key lift; the ending may turn towards what comes next)
     return { voice, shape: notes.map((x, i, a) => (i ? x[1] - a[i - 1][1] : 0)).join(',') };
   };
@@ -367,7 +375,7 @@ Deno.test("a drummer's strokes are never the same take twice in a row; a drum ma
       const last = new Map<string, number>();
       for (const e of s.events.filter(isHit)) {
         assert(e.take !== undefined && e.take >= 0 && e.take < TAKES, `${style} ${e.i} without a take`);
-        const part = `${e.i}:${'k' in e ? e.k : ''}`;
+        const part = `${e.i}:${'k' in e ? e.k : e.i === 'tom' ? e.n : ''}`;
         assertNotEquals(last.get(part), e.take, `${style} ${part} repeats a take at ${e.t.toFixed(2)} s`);
         last.set(part, e.take);
       }
@@ -472,4 +480,150 @@ Deno.test("every part follows the section's clock", () => {
   // and the movement's length is the sum of its sections' played lengths
   const sum = mv.sections.reduce((n, x) => n + x.seconds, 0);
   assert(Math.abs(sum - mv.duration) < 1e-9);
+});
+
+Deno.test('a returning melody is ornamented with grace notes; its first statement and a sequencer never are', () => {
+  const graces = (s: ReturnType<typeof composeSection>) => {
+    const ts = s.events.filter(isMelody).flatMap((e) => ('ns' in e ? e.ns.map((n) => n.t) : [e.t])).sort((a, b) =>
+      a - b
+    );
+    return ts.filter((t, i) => ts[i + 1] !== undefined && ts[i + 1] - t > 0.03 && ts[i + 1] - t < 0.1).length;
+  };
+  let returning = 0;
+  for (const style of ['haze', 'nocturne', 'ember', 'garden'] as const) {
+    const song = new Song(`graces-${style}`, [style]);
+    const mv = song.movement(0);
+    mv.sections.forEach((_, k) => {
+      const ctx = new Ctx(song, mv.firstSection + k);
+      const n = graces(composeSection(song, mv.firstSection + k));
+      if (!ctx.returning) assertEquals(n, 0, `${style} ${ctx.role} ornaments its first statement`);
+      else returning += n;
+    });
+  }
+  assert(returning >= 4, `only ${returning} grace notes in returning parts`);
+  for (const s of sectionsOf('graces-acid', 'acid')) assertEquals(graces(s), 0);
+});
+
+Deno.test('the band listens: softer under the melody, fuller in its rests, swelling into a bigger part', () => {
+  const song = new Song('listening', ['garden']);
+  const mv = song.movement(0);
+  const k = mv.sections.findIndex((s, i) => mv.sections[i + 1] && mv.sections[i + 1].energy - s.energy > 0.2);
+  const ctx = new Ctx(song, mv.firstSection + k);
+  ctx.events.length = 0;
+  // a melody note in every other bar, and a chord on every beat under it all
+  for (let b = 0; b < ctx.bars; b += 2) {
+    ctx.push({
+      i: 'wind',
+      t: ctx.barAt(b),
+      k: 'flute',
+      ns: [{ t: ctx.barAt(b), d: ctx.bar * 0.9, n: 72, v: 0.8 }],
+      lead: true,
+    });
+  }
+  for (let q = 0; q < ctx.bars * 4; q++) {
+    ctx.push({ i: 'piano', t: q * ctx.beat, d: ctx.beat / 2, n: [60, 64, 67], v: 0.5 });
+  }
+  perform(ctx);
+  const piano = ctx.events.filter((e): e is Extract<Ev, { i: 'piano' }> => e.i === 'piano');
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const bar = (e: Ev) => Math.floor((e.t + 0.05) / ctx.bar);
+  const early = piano.filter((e) => bar(e) < ctx.bars - 2);
+  const under = mean(early.filter((e) => bar(e) % 2 === 0).map((e) => e.v));
+  const rests = mean(early.filter((e) => bar(e) % 2 === 1).map((e) => e.v));
+  assert(under < rests * 0.8, `under the melody ${under.toFixed(2)}, in its rests ${rests.toFixed(2)}`);
+  const last = piano.filter((e) => bar(e) === ctx.bars - 1).sort((a, b) => a.t - b.t);
+  assert(last[last.length - 1].v > last[0].v * 1.1, 'no swell into the bigger part');
+});
+
+Deno.test('a slow piece is pedalled: the left hand rings to the next chord; a groove is not', () => {
+  const held = (style: StyleId) => {
+    let rings = 0;
+    let all = 0;
+    for (const seed of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      for (const s of sectionsOf(`pedal-${seed}`, style)) {
+        const next = (t: number) => s.chords.find((c) => c.t > t + 0.1)?.t ?? s.duration;
+        for (const e of s.events) {
+          if (e.i !== 'piano' || isMelody(e)) continue;
+          all++;
+          if (e.t + e.d >= next(e.t) - 1e-6) rings++;
+        }
+      }
+    }
+    assert(all > 20, `only ${all} ${style} piano notes`);
+    return rings / all;
+  };
+  assert(held('nocturne') > 0.95, `only ${(held('nocturne') * 100).toFixed(0)}% of nocturne's piano rings on`);
+  assert(held('haze') < 0.5, "lo-fi's comping is pedalled");
+});
+
+Deno.test('a guitarist hammers on, slides and squeaks; flams and fills vary on a drummed kit', () => {
+  const all = ['ember', 'haze', 'garden'].flatMap((style) =>
+    [0, 1, 2].flatMap((k) => sectionsOf(`fret-${style}-${k}`, style as StyleId))
+  );
+  const strings = all.flatMap((s) => s.events.filter((e): e is Extract<Ev, { i: 'string' }> => e.i === 'string'));
+  assert(strings.some((e) => e.slur) && strings.some((e) => e.slide) && strings.some((e) => e.squeak));
+  assert(strings.every((e) => e.k !== 'harp' || (!e.slur && !e.slide && !e.squeak)));
+  // a flam: a soft stroke of the same drum 18 to 30 ms before a loud one
+  const flams = (sections: ReturnType<typeof composeSection>[]) =>
+    sections.flatMap((s) => {
+      const sn = s.events.filter((e) => e.i === 'snare') as { t: number; v: number }[];
+      return sn.filter((a) => sn.some((b) => b.t - a.t > 0.017 && b.t - a.t < 0.031 && a.v < b.v * 0.5));
+    }).length;
+  assert(flams(sectionsOf('flams', 'ember')) > 0);
+  assertEquals(flams(sectionsOf('flams', 'rise')), 0);
+  // the fills of a drummed movement are not all the same
+  const song = new Song('fills', ['ember']);
+  const mv = song.movement(0);
+  const s16 = 60 / mv.bpm / 4;
+  const fills = new Set<string>();
+  mv.sections.forEach((sec, k) => {
+    if (sec.role !== 'chorus' && sec.role !== 'drop' && sec.role !== 'verse') return;
+    const s = composeSection(song, mv.firstSection + k);
+    const clock = new Clock(mv, k);
+    const ctx = new Ctx(song, mv.firstSection + k);
+    for (let b = 0; b < sec.bars; b++) {
+      if (ctx.runBar(b) % 8 !== 7) continue;
+      const steps = s.events.filter((e) => (e.i === 'snare' || e.i === 'tom') && (e as { v: number }).v > 0.2)
+        .map((e) => Math.round(clock.written(e.t) / s16) - b * 16).filter((x) => x >= 0 && x < 16);
+      fills.add([...new Set(steps)].sort((x, y) => x - y).join(','));
+    }
+  });
+  assert(fills.size > 1, `every fill is ${[...fills][0]}`);
+});
+
+Deno.test('a slide glides onto its note; a long wind note swells', () => {
+  const tone = new Song('slide', ['ember']).movement(0).tone;
+  const sr = 22050;
+  const guitar = (slide?: number) => {
+    const b = new Bus(sr, 1.5, 3, tone);
+    string(b, { i: 'string', t: 0.2, n: 57, v: 0.8, k: 'guitar', d: 1, slide });
+    return b.L.map((x, i) => x + b.ML[i]);
+  };
+  const pitch = (x: Float32Array, at: number) => {
+    const a = Math.round(at * sr);
+    let best = 0;
+    let lag = 0;
+    for (let L = Math.round(sr / 400); L < Math.round(sr / 150); L++) {
+      let c = 0;
+      let e = 0;
+      for (let i = a; i < a + Math.round(0.03 * sr); i++) {
+        c += x[i] * x[i + L];
+        e += x[i + L] ** 2;
+      }
+      if (c / Math.sqrt(e + 1e-12) > best) [best, lag] = [c / Math.sqrt(e + 1e-12), L];
+    }
+    return sr / lag;
+  };
+  const plain = guitar();
+  const slid = guitar(-2);
+  assert(pitch(slid, 0.205) < pitch(plain, 0.205) * 0.95, 'the slide starts on its note');
+  assertAlmostEquals(pitch(slid, 0.5), pitch(plain, 0.5), 1);
+  const b = new Bus(sr, 3, 5, tone);
+  wind(b, { i: 'wind', t: 0.1, k: 'sax', ns: [{ t: 0.1, d: 2.4, n: 65, v: 0.7 }] });
+  const rms = (a: number, z: number) => {
+    let e = 0;
+    for (let i = Math.round(a * sr); i < Math.round(z * sr); i++) e += b.ML[i] ** 2;
+    return Math.sqrt(e / ((z - a) * sr));
+  };
+  assert(rms(1.9, 2.2) > rms(0.3, 0.6) * 1.12, 'a long note stays flat');
 });

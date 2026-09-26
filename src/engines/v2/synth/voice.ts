@@ -1,6 +1,7 @@
 // Two voices built on filters: a choir (detuned saws through the formants of a sung vowel) and an acid
 // line (one saw or square through a resonant low-pass whose envelope snaps on every note, as on a TB-303).
 
+import { hash32, Rng } from '../rng.ts';
 import type { Ev, Note, Vowel } from '../types.ts';
 import type { Bus } from './bus.ts';
 import { Noise, pan, saw, smooth, SVF, TAU, Wander } from './dsp.ts';
@@ -80,6 +81,8 @@ interface Breath {
   vib: readonly [number, number, number, number, number];
   /** Slow pitch wander, cents rms. */
   drift: number;
+  /** A long note (over 0.8 s) swells: it starts this much under its level and ends this much over it, halved. */
+  swell: number;
   /** Breath noise: band-pass Hz and Q, high-pass Hz, low-pass Hz, rms re the tone, pitch-synchronous depth. */
   noise: readonly [number, number, number, number, number, number];
   /** The noise grows as (level / 0.7)^noiseDyn against the tone: a soft flute or trumpet is less breathy. */
@@ -110,6 +113,7 @@ const BREATH: Record<'sax' | 'flute' | 'hum' | 'brass', Breath> = {
     scoop: [5, 0.03, 30],
     vib: [4.8, 9, 0.04, 0.35, 0.45],
     drift: 1.5,
+    swell: 0.25,
     noise: [1600, 0.6, 400, 9000, 0.012, 0.6],
     noiseDyn: 0,
     burst: [0.12, 0.02],
@@ -131,6 +135,7 @@ const BREATH: Record<'sax' | 'flute' | 'hum' | 'brass', Breath> = {
     scoop: [8, 0.08, 0],
     vib: [4.8, 13, 0.2, 0.3, 0.4],
     drift: 1.4,
+    swell: 0.2,
     noise: [2000, 0.5, 250, 16000, 0.025, 0.4],
     noiseDyn: 1,
     burst: [0.3, 0.02],
@@ -152,6 +157,7 @@ const BREATH: Record<'sax' | 'flute' | 'hum' | 'brass', Breath> = {
     scoop: [10, 0.04, 0],
     vib: [5, 22, 0.18, 0.1, 0.3],
     drift: 2,
+    swell: 0.15,
     noise: [600, 0.35, 200, 6000, 0.012, 0.5],
     noiseDyn: 0,
     burst: [0.2, 0.01],
@@ -174,6 +180,7 @@ const BREATH: Record<'sax' | 'flute' | 'hum' | 'brass', Breath> = {
     scoop: [42, 0.035, -70],
     vib: [5, 5, 0.03, 0.4, 0.4],
     drift: 1.5,
+    swell: 0.35,
     noise: [1400, 1.4, 600, 3000, 0.02, 0.7],
     noiseDyn: 1,
     burst: [0.5, 0.01],
@@ -222,7 +229,9 @@ const at = (e: readonly number[], g: number) => {
 };
 
 /**
- * One breath over a phrase: legato notes glide, a fresh note after a rest gets a scoop and an onset burst. The
+ * One breath over a phrase: legato notes glide, a fresh note after a rest gets a scoop and an onset burst. No two
+ * notes are shaded alike: each has its own vibrato (deeper or shallower, a little faster or slower, deepening as a
+ * long note goes on) and lands a few cents off before the player hears it and settles; a long note swells. The
  * tone is a sum of harmonics (cosines by Chebyshev recursion, so one cos() a sample) whose levels follow the
  * spectral envelope at the current brightness; breath noise is shaped, scaled with the flow and pulsed at the pitch.
  */
@@ -270,6 +279,11 @@ function breath(
   const joined = (j: number) => j > 0 && ns[j - 1].t + ns[j - 1].d >= ns[j].t - 0.01;
   /** A joined note is tongued when it repeats the pitch or the one before it is long enough to articulate. */
   const tongued = (j: number) => P.tongue[0] > 0 && (ns[j].n === ns[j - 1].n || ns[j].t - ns[j - 1].t >= 0.25);
+  // this note's own shading (see above), drawn from the note itself so a note always sounds the same
+  let vibDepth = 1;
+  let vibRate = vr;
+  let intone = 0;
+  const ki = exp(-CTRL / (0.25 * sr));
   let drift = 0;
   let lvl = 1;
   let nl = P.noise[4];
@@ -291,6 +305,10 @@ function breath(
         pitch = nt.n; // a tongued or fresh note starts on its pitch (plus the scoop); only slurs glide
       }
       ka = 1 - exp(-1 / ((P.att[0] + P.att[1] * (1 - nt.v) ** 2) * sr));
+      const r = new Rng(hash32(round(nt.t * 1000), nt.n, 0x766962));
+      vibDepth = r.range(0.6, 1.4);
+      vibRate = vr * r.range(0.93, 1.07);
+      intone = r.jitter(7);
       // the note's own end: where the tongue stops it before a tongued neighbour, else near its written end
       const next = k + 1 < ns.length && joined(k + 1);
       const tongue = next && tongued(k + 1);
@@ -299,22 +317,24 @@ function breath(
       lastNote = k;
     }
     const on = u < stop;
-    const target = on ? nt.v : 0;
+    const swell = nt.d > 0.8 ? 1 + P.swell * (smooth(u / (0.7 * nt.d)) - 0.5) : 1;
+    const target = on ? nt.v * swell : 0;
     amp += (target - amp) * (target > amp ? ka : krk);
     pitch += (nt.n - pitch) * kg;
     scoop *= ks;
     burst *= kburst;
     bloom *= kbloom;
-    const ramp = smooth((u - von) / vramp);
-    vph += vr / sr;
+    const ramp = smooth((u - von) / vramp) * vibDepth * (1 + 0.4 * smooth((u - 1) / 1.5));
+    vph += vibRate / sr;
     if (vph >= 1) vph -= 1;
     const vs = sin(TAU * vph);
     if (((i - i0) & (CTRL - 1)) === 0) {
       drift = P.drift * wp.next(b.noise.next());
+      intone *= ki;
       lvl = 1 + 0.06 * wa.next(b.noise.next());
       bright += (amp - bright) * kb;
       nl = P.noise[4] * (max(amp, 1e-3) / 0.7) ** P.noiseDyn;
-      const cents = scoop + vd * ramp * vs + drift;
+      const cents = scoop + vd * ramp * vs + drift + intone;
       f = b.hz(pitch + cents / 100) * (out.pitch ? out.pitch(t) : 1);
       // harmonic levels from the envelopes blended at the current brightness (and register)
       const x = bright * tone;

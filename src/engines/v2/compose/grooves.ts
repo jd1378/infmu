@@ -6,6 +6,7 @@ import type { BassKind } from '../types.ts';
 import { hash32, Rng } from '../rng.ts';
 import type { Ctx } from './context.ts';
 import { bassFigure, type BassHit, type DrumBar, type DrumKit, drums, grid, type PercBar, percBar } from './parts.ts';
+import { drummed } from './perform.ts';
 
 /** Pitched drums, taiko or toms: `lo` on the tonic (octave 2), `mid` a fifth above it, `hi` an octave above it. */
 export interface TomBar {
@@ -98,6 +99,54 @@ export interface GroovePlay {
   withBass?: boolean;
 }
 
+/** Styles whose drummer fills round the toms. */
+const TOMS: ReadonlySet<string> = new Set(['ember', 'cathedral']);
+
+/**
+ * A drummer's fill is never quite the same twice: as written, or started half-way through the bar, or with a
+ * pickup of ghost notes into the downbeat, or (on a kit with toms) its last beat taken round the toms. A drum
+ * machine plays its programmed fill every time.
+ */
+function fillOf(ctx: Ctx, g: Groove, full: boolean, rb: number, layer: boolean): GrooveBar {
+  const written = grooveLanes(g, full, rb, layer, true);
+  if (!drummed(ctx.mv.style)) return written;
+  const rng = new Rng(hash32(ctx.mv.seed, ctx.local, rb, 0x66696c));
+  const ways: [string, number][] = [['written', 3], ['late', 2], ['pickup', 2]];
+  if (TOMS.has(ctx.mv.style)) ways.push(['toms', 2]);
+  const base = grooveLanes(g, full, rb, layer, false);
+  const out: GrooveBar = { ...written };
+  const lanes = Object.keys(g.fill) as (keyof GrooveBar)[];
+  switch (rng.weighted(ways)) {
+    case 'late':
+      for (const k of lanes) out[k] = (base[k] ?? '.'.repeat(16)).slice(0, 8) + (written[k] ?? '').slice(8);
+      break;
+    case 'pickup': {
+      const sn = [...(written.snare ?? '.'.repeat(16))];
+      for (let s = 12; s < 16; s++) if (sn[s] === '.') sn[s] = '-';
+      out.snare = sn.join('');
+      break;
+    }
+    case 'toms': {
+      const sn = [...(written.snare ?? '.'.repeat(16))];
+      const toms = { hi: [...'.'.repeat(16)], mid: [...'.'.repeat(16)], lo: [...'.'.repeat(16)] };
+      const order = ['hi', 'hi', 'mid', 'lo'] as const;
+      let k = 0;
+      for (let s = 12; s < 16; s++) {
+        if (sn[s] === '.') continue;
+        toms[order[Math.min(3, k++)]][s] = sn[s];
+        sn[s] = '.';
+      }
+      if (!k) break;
+      out.snare = sn.join('');
+      out.hi = toms.hi.join('');
+      out.mid = toms.mid.join('');
+      out.lo = toms.lo.join('');
+      break;
+    }
+  }
+  return out;
+}
+
 /**
  * Bar `b` of the movement's groove in the current section. Verses, prechoruses and outros play it light,
  * choruses, drops and solos full (with the answer bar on every second bar). A returning part adds the groove's
@@ -110,7 +159,14 @@ export function playGroove(ctx: Ctx, g: Groove, b: number, o: GroovePlay): void 
   const layer = ctx.role !== 'solo' && (ctx.returning || rb >= 8);
   const fill = rb % 8 === 7 && (full || ctx.role === 'verse');
   const kit = { ...o.kit, ...g.kit, lag: g.lag };
-  grooveBar(ctx, b, grooveLanes(g, full, rb, layer, fill), kit, o.gain ?? 1, o.perc ?? 0.6);
+  grooveBar(
+    ctx,
+    b,
+    fill ? fillOf(ctx, g, full, rb, layer) : grooveLanes(g, full, rb, layer, false),
+    kit,
+    o.gain ?? 1,
+    o.perc ?? 0.6,
+  );
   if (o.withBass === false) return;
   const bass = ctx.role === 'prechorus' ? g.bassFull : grooveBass(g, full, rb, fill);
   bassFigure(ctx, b, bass, full ? g.bassKind ?? o.bass : o.bass, o.bassGain);

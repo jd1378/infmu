@@ -131,7 +131,24 @@ export type Ev =
   | { i: 'breath'; t: number; d: number }
   | { i: 'sweep'; t: number; d: number; x0?: number; x1?: number }
   | { i: 'stop'; t: number; d: number }
-  | { i: 'string'; t: number; n: number; v: number; k: StringKind; d?: number; p?: number; lead?: boolean }
+  /**
+   * A plucked note. The fretting hand's techniques: `slur`, hammered on or pulled off from the note before
+   * rather than picked; `slide`, slid into from this many semitones away; `squeak`, how loud the hand squeaks
+   * along a wound string as it shifts to the note (0 to 1).
+   */
+  | {
+    i: 'string';
+    t: number;
+    n: number;
+    v: number;
+    k: StringKind;
+    d?: number;
+    p?: number;
+    lead?: boolean;
+    slur?: boolean;
+    slide?: number;
+    squeak?: number;
+  }
   | { i: 'mallet'; t: number; n: number; v: number; k: MalletKind; p?: number; lead?: boolean }
   | { i: 'piano'; t: number; d: number; n: number[]; v: number; strum?: number; lead?: boolean }
   | { i: 'choir'; t: number; d: number; n: number[]; vowel: Vowel; g?: number }

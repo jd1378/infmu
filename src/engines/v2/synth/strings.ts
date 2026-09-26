@@ -11,12 +11,15 @@
 // - The body (acoustic guitar, harp) and the pickup (electric) are linear, so they are commuted into the
 //   excitation: they shape the first 120 ms of input to the loops rather than every output sample, which
 //   keeps a voice about as cheap as a bare loop.
+// - The fretting hand: a hammered-on or pulled-off note is not picked, so it has no pick attack and a darker
+//   start; a slide glides the loop's length from the fret it starts on; a squeak is the hand's skin brushing
+//   along a wound string as it shifts, a short band of noise sweeping up.
 // The overdriven guitar is summed dry on the amp bus, so a chord distorts as a whole the way it does through a
 // real amp.
 
 import type { Ev, StringKind } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { SVF } from './dsp.ts';
+import { smooth, SVF } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 
@@ -95,14 +98,17 @@ const MODELS: Record<StringKind, Model> = {
   overdrive: { ...ELECTRIC, gain: 1 },
 };
 
+/** A squeak at level 1 against a note at velocity 0.8: about 15 dB under it. */
+const SQUEAK = 0.14;
+
 /** One polarization: a delay line with a one-pole loss filter and an allpass for the fraction of a sample. */
 class Loop {
   private readonly buf: Float32Array;
   private readonly N: number;
-  private readonly g: number;
-  private readonly c: number;
+  readonly g: number;
+  readonly c: number;
   private readonly C: number;
-  private readonly mute: number;
+  readonly mute: number;
   private idx = 0;
   private lp = 0;
   private apx = 0;
@@ -134,7 +140,7 @@ class Loop {
     this.buf = new Float32Array(this.N);
   }
 
-  tick(input: number, held: boolean): number {
+  tick(input: number, held: boolean, _t = 0): number {
     const x = this.buf[this.idx] + input;
     this.lp = (1 - this.c) * x + this.c * this.lp;
     const ap = this.C * this.lp + this.apx - this.C * this.apy;
@@ -142,6 +148,56 @@ class Loop {
     this.apy = ap;
     this.buf[this.idx] = ap * (held ? this.g : this.g * this.mute);
     this.idx = this.idx + 1 < this.N ? this.idx + 1 : 0;
+    return x;
+  }
+}
+
+/**
+ * A loop whose length can change while it rings (a slide): a delay line read at a fractional position through
+ * a third-order Lagrange interpolator, with the same loss filter as Loop. The interpolator darkens the note a
+ * little, as a sliding finger does.
+ */
+class GlideLoop {
+  private readonly buf: Float32Array;
+  private readonly g: number;
+  private readonly c: number;
+  private readonly mute: number;
+  private readonly lpDelay: number;
+  private w = 0;
+  private lp = 0;
+
+  /** Rings at f; `bend(t)` is the pitch as a ratio to f at t seconds (1 once the slide is over). */
+  constructor(
+    private readonly sr: number,
+    private readonly f: number,
+    t0: number,
+    t4k: number,
+    private readonly bend: (t: number) => number,
+    lowest: number,
+  ) {
+    const ref = new Loop(sr, f, t0, t4k);
+    this.c = ref.c;
+    this.g = ref.g;
+    this.mute = ref.mute;
+    const w0 = (2 * Math.PI * f) / sr;
+    this.lpDelay = Math.atan2(this.c * Math.sin(w0), 1 - this.c * Math.cos(w0)) / w0;
+    this.buf = new Float32Array(Math.ceil(sr / (f * lowest)) + 8);
+  }
+
+  tick(input: number, held: boolean, t: number): number {
+    const L = this.buf.length;
+    const D = Math.max(3, this.sr / (this.f * this.bend(t)) - this.lpDelay);
+    const r = this.w - D;
+    const i = Math.floor(r);
+    const a = r - i;
+    const at = (k: number) => this.buf[((i + k) % L + L) % L];
+    // Lagrange weights for points i-1, i, i+1, i+2 at fraction a
+    const y = -a * (a - 1) * (a - 2) / 6 * at(-1) + (a + 1) * (a - 1) * (a - 2) / 2 * at(0) -
+      (a + 1) * a * (a - 2) / 2 * at(1) + (a + 1) * a * (a - 1) / 6 * at(2);
+    const x = y + input;
+    this.lp = (1 - this.c) * x + this.c * this.lp;
+    this.buf[this.w] = this.lp * (held ? this.g : this.g * this.mute);
+    this.w = this.w + 1 < L ? this.w + 1 : 0;
     return x;
   }
 }
@@ -187,7 +243,8 @@ function excitation(b: Bus, e: E<'string'>, m: Model, f: number): { pluck: Float
   const w = Math.max(1, Math.round(beta * N));
   const shape = new Float32Array(N);
   for (let i = 0; i < N; i++) shape[i] = (i < w ? 1 - w / N : -w / N) + 0.04 * b.noise.next();
-  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** (4 * (e.v - 0.7)), sr);
+  // a hammer-on or pull-off sets the string going without a pick: a softer, rounder push
+  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** (4 * (e.v - 0.7)) * (e.slur ? 0.3 : 1), sr);
   let mean = 0;
   for (let i = 0; i < N; i++) mean += shape[i];
   mean /= N;
@@ -207,8 +264,8 @@ function excitation(b: Bus, e: E<'string'>, m: Model, f: number): { pluck: Float
     const res = new SVF(sr, m.pickup.res[0], m.pickup.res[1]);
     for (let i = 0; i < L; i++) pluck[i] = res.run(pluck[i]);
   }
-  const knock = new Float32Array(m.knock ? L : 0);
-  if (m.knock) {
+  const knock = new Float32Array(m.knock && !e.slur ? L : 0);
+  if (m.knock && !e.slur) {
     const [sec, fc, level] = m.knock;
     const kl = Math.min(L, Math.round(sec * sr));
     const a = 1 - Math.exp((-2 * Math.PI * fc) / sr);
@@ -242,17 +299,30 @@ export function string(b: Bus, e: E<'string'>): void {
   // the second polarization's beats and two-stage decay take seconds to show: short notes skip it
   const [share, cents, ratio] = len > 1 ? m.pol : [0, 0, 1];
   // detuned about f, so the pitch the two average to is f
-  const A = new Loop(sr, f * 2 ** ((-share * cents) / 1200), t0, m.t4k);
-  const B = share ? new Loop(sr, f * 2 ** (((1 - share) * cents) / 1200), ratio * t0, ratio * m.t4k) : null;
+  const fa = f * 2 ** ((-share * cents) / 1200);
+  const fb = f * 2 ** (((1 - share) * cents) / 1200);
+  // a slide: from `slide` semitones away onto the note, fast in the middle, settling at the fret
+  const slide = e.slide ?? 0;
+  const glide = 0.04 + 0.03 * Math.abs(slide);
+  const bend = (t: number) => (t >= glide ? 1 : 2 ** ((slide / 12) * (1 - smooth(t / glide))));
+  const lowest = 2 ** (Math.min(0, slide) / 12);
+  const A = slide ? new GlideLoop(sr, fa, t0, m.t4k, bend, lowest) : new Loop(sr, fa, t0, m.t4k);
+  const B = !share
+    ? null
+    : slide
+    ? new GlideLoop(sr, fb, ratio * t0, ratio * m.t4k, bend, lowest)
+    : new Loop(sr, fb, ratio * t0, ratio * m.t4k);
   const { pluck, knock } = excitation(b, e, m, f);
   const fade = 0.25 * len;
   const tick = (j: number, t: number): number => {
     const x = j < pluck.length ? pluck[j] : 0;
     const held = t < d;
-    let y = A.tick((1 - share) * x, held) + (j < knock.length ? knock[j] : 0);
-    if (B) y += B.tick(share * x, held);
+    let y = A.tick((1 - share) * x, held, t) + (j < knock.length ? knock[j] : 0);
+    if (B) y += B.tick(share * x, held, t);
     return t > len - fade ? (y * (len - t)) / fade : y;
   };
+  const p = e.p ?? Math.max(-0.5, Math.min(0.5, (e.n - 62) / 28));
+  if (e.squeak) squeak(b, e.t, e.squeak, p);
   if (e.k === 'overdrive') {
     // dry into the amp bus; the amp in the master adds drive, cabinet and room
     const i0 = Math.round(e.t * sr);
@@ -266,9 +336,35 @@ export function string(b: Bus, e: E<'string'>): void {
     e.t,
     len,
     (j, t) => tick(j, t) * g,
-    e.p ?? Math.max(-0.5, Math.min(0.5, (e.n - 62) / 28)),
+    p,
     e.k === 'harp' ? 0.4 : 0.22,
     e.k === 'harp' ? 0.15 : e.k === 'electric' ? 0.3 : 0.12,
+    0.3,
+  );
+}
+
+/**
+ * The fretting hand squeaking along a wound string as it shifts, just before the note it shifts to: noise
+ * through a narrow band that sweeps up with the hand's speed across the windings.
+ */
+function squeak(b: Bus, t: number, level: number, p: number): void {
+  const sr = b.sr;
+  const dur = 0.08 + 0.08 * b.noise.unit();
+  const f0 = 900 + 700 * b.noise.unit();
+  const f1 = f0 * (1.8 + b.noise.unit());
+  const bp = new SVF(sr, f0, 5);
+  b.voice(
+    Math.max(0, t - dur - 0.01),
+    dur,
+    (j, u) => {
+      const x = u / dur;
+      if ((j & 15) === 0) bp.set(f0 * (f1 / f0) ** x);
+      bp.run(b.noise.next());
+      return bp.bp * Math.sin(Math.PI * x) ** 2 * level * SQUEAK;
+    },
+    p,
+    0.22,
+    0.12,
     0.3,
   );
 }

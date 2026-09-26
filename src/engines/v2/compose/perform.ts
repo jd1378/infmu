@@ -10,6 +10,7 @@
 // Everything is drawn from the seed's own streams, so a seed still plays the same performance.
 
 import type { Rng } from '../rng.ts';
+import { MODES, pc } from '../theory.ts';
 import { type Ev, isMelody, type Note, type StyleId, TAKES } from '../types.ts';
 import type { Ctx } from './context.ts';
 
@@ -76,7 +77,12 @@ function player(ctx: Ctx, rng: Rng, { drift, jitter, loud: moves, melody }: Touc
 
 export function perform(ctx: Ctx): void {
   players(ctx);
+  // after the timing: a grace note stays with its note, however late that comes
+  ornament(ctx);
   drummer(ctx);
+  listen(ctx);
+  pedal(ctx);
+  fretwork(ctx);
 }
 
 function players(ctx: Ctx): void {
@@ -146,6 +152,9 @@ const FEEL: Partial<Record<StyleId, Record<Limb, number>>> = {
   ember: { kick: 0, snare: 0.006, hat: -0.004, perc: -0.003, tom: 0.002 },
 };
 
+/** Whether a style's drums are played by a drummer (else a drum machine plays them as programmed). */
+export const drummed = (style: StyleId): boolean => style in FEEL;
+
 /** How far each limb's dynamics reach: a stroke's level against the loudest of its part is raised to this. */
 const REACH: Record<Limb, number> = { kick: 1, snare: 1.6, hat: 1.3, perc: 1.3, tom: 1.2 };
 
@@ -163,9 +172,11 @@ function drummer(ctx: Ctx): void {
   // one drummer across the movement: their drift runs on through the sections
   const from = ctx.mv.sections.slice(0, ctx.local).reduce((n, s) => n + s.bars, 0) * ctx.bar;
   const parts = new Map<string, Hit[]>();
+  const flams: Hit[] = [];
   for (const e of ctx.events) {
     if (e.i !== 'kick' && e.i !== 'snare' && e.i !== 'hat' && e.i !== 'perc' && e.i !== 'tom') continue;
-    const part = `${e.i}:${'k' in e ? e.k : ''}`;
+    // each tom is a drum of its own
+    const part = `${e.i}:${'k' in e ? e.k : e.i === 'tom' ? e.n : ''}`;
     const known = parts.get(part);
     if (known) known.push(e);
     else parts.set(part, [e]);
@@ -177,7 +188,12 @@ function drummer(ctx: Ctx): void {
     const time = wander(ctx.mrng.fork('drummer', limb, 'time'));
     const loud = wander(ctx.mrng.fork('drummer', limb, 'loud'));
     const top = Math.max(...hits.map((e) => e.v));
-    let take = rng.int(TAKES);
+    // a take other than the stroke before's
+    let last = -1;
+    const fresh = () => {
+      const k = rng.int(last < 0 ? TAKES : TAKES - 1);
+      return (last = last >= 0 && k >= last ? k + 1 : k);
+    };
     for (const e of hits) {
       const rel = e.v / top;
       let v = top * rel ** REACH[limb];
@@ -190,8 +206,189 @@ function drummer(ctx: Ctx): void {
       if (rb % 4 === 3 && into > 0) v *= 1 + (rb % 8 === 7 ? 0.25 : 0.12) * into;
       e.v = Math.max(0.02, v);
       e.t = Math.max(0, e.t + feel[limb] + 0.003 * time(from + e.t) + (limb === 'kick' ? rng.jitter(0.0015) : 0));
-      e.take = take;
-      take = (take + 1 + rng.int(TAKES - 1)) % TAKES;
+      // a fill's accents are flammed: the other stick a hair before, softly
+      const fill = rb % 8 === 7 && into > 0 && rel > 0.8;
+      if ((limb === 'snare' || limb === 'tom') && fill && rng.chance(0.5)) {
+        const t = Math.max(0, e.t - rng.range(0.018, 0.03));
+        flams.push({ ...e, t, v: e.v * rng.range(0.3, 0.45), take: fresh() });
+      }
+      e.take = fresh();
+    }
+  }
+  ctx.push(...flams);
+}
+
+// ------------------------------------------------------------------ the rest of the band
+
+/** One note of the melody, wherever it's written: an event of its own, or a note of a line. */
+interface Sung {
+  t: number;
+  d: number;
+  n: number;
+  /** Ends the note at `d` seconds. */
+  cut(d: number): void;
+  /** Adds a grace note leaning into this one. */
+  lean(t: number, d: number, n: number): void;
+}
+
+/** The melody's notes, in time order; a note without a length lasts until the next. */
+function melodyNotes(ctx: Ctx): Sung[] {
+  const out: (Omit<Sung, 'd'> & { d?: number })[] = [];
+  for (const e of ctx.events) {
+    if (!isMelody(e)) continue;
+    if ('ns' in e) {
+      const ns: Note[] = e.ns;
+      for (const x of ns) {
+        out.push({
+          t: x.t,
+          d: x.d,
+          n: x.n,
+          cut: (d) => (x.d = d),
+          lean: (t, d, n) => {
+            ns.splice(ns.indexOf(x), 0, { t, d, n, v: x.v * 0.7 });
+            e.t = ns[0].t;
+          },
+        });
+      }
+    } else if (e.i === 'string' || e.i === 'mallet' || e.i === 'piano' || e.i === 'bell') {
+      const n = typeof e.n === 'number' ? e.n : e.n[0];
+      out.push({
+        t: e.t,
+        d: 'd' in e ? e.d : undefined,
+        n,
+        cut: (d) => {
+          if ('d' in e) e.d = d;
+        },
+        lean: (t, d, m) =>
+          ctx.push({ ...e, t, v: e.v * 0.7, n: typeof e.n === 'number' ? m : [m], ...('d' in e ? { d } : {}) } as Ev),
+      });
+    }
+  }
+  out.sort((a, b) => a.t - b.t);
+  return out.map((x, k) => ({ ...x, d: x.d ?? (out[k + 1] ? out[k + 1].t - x.t : ctx.beat) }));
+}
+
+/**
+ * A returning melody is ornamented a little, differently each time: a grace note a step above, or a semitone
+ * below, leans into a few of its longer notes. The written hook stays; only its playing changes. A hook doubled
+ * by a second voice is played plain (the two would ornament it differently), and a sequencer never ornaments.
+ */
+function ornament(ctx: Ctx): void {
+  if (!ctx.returning) return;
+  const voices = new Set(ctx.events.filter(isMelody).map((e) => `${e.i}:${'k' in e ? e.k : ''}`));
+  const first = ctx.events.find(isMelody);
+  if (voices.size !== 1 || !first || !touch(ctx, first)) return;
+  const rng = ctx.rng.fork('ornament');
+  const grace = Math.min(0.08, ctx.s16 / 2);
+  const scale = MODES[ctx.key.mode].map((x) => (x + ctx.key.tonic) % 12);
+  const above = (n: number) => (scale.includes(pc(n + 1)) ? n + 1 : n + 2);
+  const mel = melodyNotes(ctx);
+  let budget = Math.max(1, Math.round(ctx.bars / 4));
+  for (let k = 0; k < mel.length && budget > 0; k++) {
+    const m = mel[k];
+    const prev = mel[k - 1];
+    const onBeat = Math.abs(m.t / ctx.beat - Math.round(m.t / ctx.beat)) < 0.06;
+    // room before it: a rest, or a note long enough to lend it the time
+    const room = !prev || prev.t + prev.d <= m.t - grace || m.t - grace - prev.t >= grace;
+    if (m.d < ctx.beat || !onBeat || !room || m.t < grace || !rng.chance(0.35)) continue;
+    budget--;
+    if (prev && prev.t + prev.d > m.t - grace) prev.cut(m.t - grace - prev.t);
+    m.lean(m.t - grace, grace, rng.chance(0.6) ? above(m.n) : m.n - 1);
+  }
+}
+
+/**
+ * An ensemble listens to its singer: under a melody note the accompaniment plays softer, in the melody's rests a
+ * little fuller. And it moves together: into a bigger section the band swells through its last bar, into a
+ * calmer one it eases off. Only people listen: sequenced parts play on as programmed.
+ */
+function listen(ctx: Ctx): void {
+  const mel = melodyNotes(ctx);
+  const next = ctx.isLast ? null : ctx.mv.sections[ctx.local + 1];
+  const lift = next && next.role !== 'rest' ? next.energy - ctx.sec.energy : 0;
+  const from = ctx.duration - ctx.bar;
+  const shape = (t: number, bed: boolean) => {
+    let g = 1;
+    if (bed && mel.length) g *= mel.some((m) => t >= m.t - 0.02 && t < m.t + m.d) ? 0.8 : 1.12;
+    const x = Math.min(1, Math.max(0, (t - from) / ctx.bar));
+    if (lift > 0.1) g *= 1 + Math.min(0.25, lift) * x;
+    else if (lift < -0.15) g *= 1 - 0.15 * x;
+    return g;
+  };
+  for (const e of ctx.events) {
+    if (!touch(ctx, e)) continue;
+    // the bass keeps its level under the tune; the rest of the band makes room for it
+    const bed = !isMelody(e) && e.i !== 'bass';
+    if ('ns' in e) { for (const n of e.ns) n.v *= shape(n.t, bed); }
+    else if ('v' in e) e.v *= shape(e.t, bed);
+  }
+}
+
+/** Styles whose pianist keeps the sustain pedal down through each chord: the slow, legato ones. */
+const PEDAL: ReadonlySet<StyleId> = new Set(['nocturne', 'cathedral', 'drift']);
+
+/**
+ * The sustain pedal in a slow piece: held through each chord and changed just after the next one is struck
+ * (legato pedalling), so a broken chord rings on as a chord and the harmony never blurs into the next one. The
+ * melody's notes ring into the note after them.
+ */
+function pedal(ctx: Ctx): void {
+  if (!PEDAL.has(ctx.mv.style)) return;
+  const changes = [...ctx.chords.slice(1).map((c) => ctx.barAt(c.bar)), ctx.duration];
+  // a note up to 50 ms early belongs to the chord it anticipates
+  const up = (t: number) => (changes.find((x) => x > t + 0.05) ?? ctx.duration) + 0.06;
+  const piano = ctx.events.filter((e): e is Extract<Ev, { i: 'piano' }> => e.i === 'piano').sort((a, b) => a.t - b.t);
+  const tune = piano.filter(isMelody);
+  for (const e of piano) {
+    const held = up(e.t);
+    const next = isMelody(e) ? tune.find((x) => x.t > e.t + 1e-6) : undefined;
+    const end = next ? Math.min(held, next.t + 0.03) : held;
+    e.d = Math.max(e.d, end - e.t);
+  }
+}
+
+/**
+ * A guitarist's fretting hand. A note a step from the one before and joined to it is hammered on or pulled
+ * off, not picked (always after a grace note); a longer note reached by a leap is sometimes slid into from a
+ * fret or two away; on an acoustic's wound strings a shift of the hand squeaks now and then, in a line and
+ * between the chords of a strummed part.
+ */
+function fretwork(ctx: Ctx): void {
+  const rng = ctx.rng.fork('fretwork');
+  type Str = Extract<Ev, { i: 'string' }>;
+  const strings = ctx.events.filter((e): e is Str => e.i === 'string' && e.k !== 'harp').sort((a, b) => a.t - b.t);
+  const lines = new Map<string, Str[]>();
+  for (const e of strings) {
+    const part = `${e.k}:${e.lead === undefined ? 'chords' : e.lead ? 'melody' : 'line'}`;
+    const known = lines.get(part);
+    if (known) known.push(e);
+    else lines.set(part, [e]);
+  }
+  for (const [part, notes] of lines) {
+    if (part.endsWith(':chords')) {
+      // a strummed or picked part: the hand moves when the chord does
+      if (notes[0].k !== 'guitar') continue;
+      for (let k = 1; k < notes.length; k++) {
+        const moved =
+          ctx.chordAt(Math.floor(notes[k].t / ctx.bar)) !== ctx.chordAt(Math.floor(notes[k - 1].t / ctx.bar));
+        if (moved && notes[k].t - notes[k - 1].t > 0.1 && rng.chance(0.15)) notes[k].squeak = rng.range(0.2, 0.5);
+      }
+      continue;
+    }
+    for (let k = 1; k < notes.length; k++) {
+      const a = notes[k - 1];
+      const b = notes[k];
+      const iv = Math.abs(b.n - a.n);
+      const end = a.t + (a.d ?? ctx.beat);
+      const joined = end > b.t - 0.03 && b.t - a.t <= ctx.beat * 1.01;
+      const grace = (a.d ?? ctx.beat) <= 0.09;
+      if (iv >= 1 && iv <= 2 && joined && (grace || rng.chance(0.5))) {
+        b.slur = true;
+        a.d = b.t - a.t;
+      } else if (iv >= 3 && (b.d ?? 0) >= ctx.beat && rng.chance(0.3)) {
+        b.slide = (b.n > a.n ? -1 : 1) * rng.pick([1, 2]);
+      }
+      if (b.k === 'guitar' && iv >= 5 && b.t - end > 0.08 && rng.chance(0.3)) b.squeak = rng.range(0.3, 0.7);
     }
   }
 }
