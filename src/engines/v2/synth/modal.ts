@@ -605,6 +605,10 @@ export function perc(b: Bus, e: E<'perc'>): void {
       );
       break;
     }
+    case 'acousticRide':
+    case 'acousticCrash':
+      cymbal(b, e, CYMBALS[e.k], e.k);
+      break;
     case 'snap':
       b.hit(
         'perc:snap',
@@ -624,4 +628,129 @@ export function perc(b: Bus, e: E<'perc'>): void {
       );
       break;
   }
+}
+
+// ------------------------------------------------------------------ the acoustic kit's cymbals
+
+interface Cymbal {
+  /** Its bands of dense modes, heard as noise: centre Hz, Q, dB at a full stroke, T60 (s). */
+  bands: readonly (readonly [number, number, number, number])[];
+  /** Its lowest modes, heard as its pitch: how many between lo and hi Hz, dB, T60 (s) at 500 Hz. */
+  modes: number;
+  lo: number;
+  hi: number;
+  db: number;
+  t60: number;
+  /** How long those modes take to swell in (time constant, s): the wave reaches the edge and the plate rings. */
+  swell: number;
+  /** The stick's strike: a click over 2 kHz, gone in a millisecond. */
+  strike: number;
+  sec: number;
+  gain: number;
+  pan: number;
+  rv: number;
+}
+
+// Measured on Big Rusty Drums' 17" crash and 22" ride (Karoryfer, CC0), overhead and close mics
+const CYMBALS: Record<'acousticRide' | 'acousticCrash', Cymbal> = {
+  acousticCrash: {
+    bands: [
+      [1200, 0.8, -18, 7],
+      [2500, 0.9, -8, 7],
+      [3600, 0.9, -2, 5.5],
+      [7000, 0.9, 0, 2.5],
+      [11000, 0.8, -8, 1.2],
+    ],
+    modes: 40,
+    lo: 280,
+    hi: 1000,
+    db: -3,
+    t60: 6,
+    swell: 0.01,
+    strike: 8,
+    sec: 6,
+    gain: 0.134,
+    pan: -0.45,
+    rv: 0.3,
+  },
+  acousticRide: {
+    bands: [
+      [1200, 0.8, -12, 5],
+      [3000, 0.9, -6, 3.1],
+      [6500, 1.0, 1, 0.8],
+      [11000, 0.9, -14, 0.5],
+    ],
+    modes: 32,
+    lo: 320,
+    hi: 1500,
+    db: -17,
+    t60: 12,
+    swell: 0.006,
+    strike: 8,
+    sec: 5,
+    gain: 0.058,
+    pan: 0.5,
+    rv: 0.25,
+  },
+};
+
+/**
+ * A cymbal: its lowest modes as a few dozen partials that swell in over tens of ms and ring for many seconds, and
+ * above them modes so dense they are heard as bands of noise, each decaying at its measured rate, the highest
+ * fastest. The stick's strike is a click and the bands at once: in the recordings the highs peak at the strike
+ * (no slow build; it is the low modes that swell). A harder stroke reaches higher: a softer one loses its top as
+ * force^(0.3 per octave above 1.5 kHz).
+ */
+function cymbal(b: Bus, e: E<'perc'>, C: Cymbal, key: string): void {
+  const sr = b.sr;
+  b.hit(
+    `perc:${key}`,
+    e,
+    C.sec,
+    (s) => {
+      const f = s.bright ** 3;
+      const dark = (fc: number) => f ** (0.3 * max(0, log(fc / 1500) / log(2)));
+      // the same modes every stroke: a cymbal is cast once
+      const rnd = keyRandom(C.lo * 31 + C.hi);
+      const modes = new Modes(C.modes * 2);
+      for (let i = 0; i < C.modes; i++) {
+        const fr = C.lo * (C.hi / C.lo) ** ((i + rnd()) / C.modes) * s.tune;
+        // where the stick lands changes which modes it wakes: a new mix every stroke
+        const a = 10 ** (C.db / 20) * (0.3 + b.noise.unit()) / sqrt(C.modes);
+        const t = C.t60 * pow(500 / fr, 0.3) * s.decay;
+        const ph = TAU * rnd();
+        modes.add(fr, a, t, sr, ph);
+        modes.add(fr, -a, 1 / (1 / t + 1 / (6.907755 * C.swell)), sr, ph);
+      }
+      // two band-passes in series (12 dB/oct skirts), so a long-ringing band doesn't set its neighbours' decay
+      const bands = C.bands.filter(([fc]) => fc < sr * 0.45).map(([fc, q, db, t60]) => ({
+        f: [new SVF(sr, fc * s.tune, q), new SVF(sr, fc * s.tune, q)],
+        g: 10 ** (db / 20) * dark(fc) / (q * q),
+        d: exp(-6.907755 / (t60 * s.decay * sr)),
+      }));
+      const click = new SVF(sr, 2000, 0.7);
+      const top = new SVF(sr, 16000 * s.bright ** 2, 0.7);
+      let strike = C.strike * f ** 0.2;
+      const fade = exp(-1 / (0.001 * sr));
+      return (j) => {
+        if ((j & 1023) === 1023) modes.prune(1024);
+        const w = b.noise.next();
+        let x = modes.next();
+        for (const band of bands) {
+          band.f[0].run(w);
+          band.f[1].run(band.f[0].bp);
+          x += band.f[1].bp * band.g;
+          band.g *= band.d;
+        }
+        if (strike > 1e-5) {
+          click.run(b.noise.next());
+          x += top.run(click.hp) * strike;
+          strike *= fade;
+        }
+        return x * C.gain;
+      };
+    },
+    e.p ?? C.pan,
+    C.rv,
+  );
 }

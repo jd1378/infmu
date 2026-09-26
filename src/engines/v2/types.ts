@@ -63,7 +63,17 @@ export interface Mix {
   hiss: number | null; // noise floor, dBFS; null for none
   warmth: number; // console and tape drive, 0 = clean
   width: number; // side-to-mid ratio the bed is opened up to
+  amp: AmpTone; // how the amp drives an overdriven guitar
+  /** The echo: a clean digital ping-pong, or a tape echo whose repeats sway, darken and saturate as they go round. */
+  echo?: 'tape';
+  /** The room: the plain reverb, or a modulated hall (its decay from `room` all the same). */
+  hall?: boolean;
+  /** Share of the hall's tail fed back an octave up (0 or absent: none). */
+  shimmer?: number;
 }
+
+/** An amp's voice: a crunchy rock amp, or a Big Muff into a big amp and a 4x12 (post-rock's wall). */
+export type AmpTone = 'crunch' | 'fuzz';
 
 export interface Movement {
   index: number;
@@ -91,19 +101,37 @@ export interface Movement {
 // ------------------------------------------------------------------ score events
 // Times are seconds from the start of the section. Pitches are MIDI numbers.
 
-export type KickKind = 'soft' | 'big' | 'drop' | 'dusty' | 'punch';
-export type SnareKind = 'roll' | 'big' | 'huge' | 'clap' | 'dusty' | 'gated' | 'rim';
+// `acoustic` kinds are a real kit recorded in a room, fitted to recordings (see synth/instruments.ts). They are
+// played: give their hits a `take`, or every stroke is the full-force one, only quieter.
+export type KickKind = 'soft' | 'big' | 'drop' | 'dusty' | 'punch' | 'acoustic';
+export type SnareKind = 'roll' | 'big' | 'huge' | 'clap' | 'dusty' | 'gated' | 'rim' | 'acoustic';
+/** A tom without a kind is the synth tom. */
+export type TomKind = 'acoustic';
 export type HatKind = 'closed' | 'open' | 'shaker' | 'dusty';
 export type BassKind = 'heart' | 'sub' | 'saw' | 'roll' | 'round' | 'pulse' | '808';
 export type PadKind = 'warm' | 'wide' | 'drop' | 'stab' | 'bloom' | 'glass' | 'strings';
 export type LeadKind = 'hook' | 'hook2' | 'brass' | 'flute' | 'saw';
 export type ImpactKind = 'ping' | 'hit' | 'soft' | 'drop' | 'cosmic' | 'final';
 export type RiseKind = 'swell' | 'sweep' | 'build' | 'cymbal';
-export type StringKind = 'guitar' | 'harp' | 'electric' | 'overdrive';
+/**
+ * `clean` is post-rock's clean electric: a warm neck pickup played into long delays and a big reverb. `overdrive`
+ * goes through the amp (see Mix.amp).
+ */
+export type StringKind = 'guitar' | 'harp' | 'electric' | 'clean' | 'overdrive';
 /** Breath-driven solo voices: two instruments and a hummed voice. */
 export type WindKind = 'flute' | 'sax' | 'hum';
 export type MalletKind = 'marimba' | 'vibes' | 'kalimba';
-export type PercKind = 'conga' | 'congaHi' | 'bongo' | 'cowbell' | 'ride' | 'crash' | 'snap';
+/** `acousticRide` and `acousticCrash` are the acoustic kit's cymbals. */
+export type PercKind =
+  | 'conga'
+  | 'congaHi'
+  | 'bongo'
+  | 'cowbell'
+  | 'ride'
+  | 'crash'
+  | 'snap'
+  | 'acousticRide'
+  | 'acousticCrash';
 /** Sung vowels for the choir; 'm' is a closed-mouth hum. */
 export type Vowel = 'a' | 'o' | 'u' | 'm';
 
@@ -131,7 +159,7 @@ export const TAKES = 4;
 export type Ev =
   | { i: 'kick'; t: number; v: number; k: KickKind; sc: number; n: number; take?: number }
   | { i: 'snare'; t: number; v: number; k: SnareKind; take?: number }
-  | { i: 'tom'; t: number; v: number; n: number; take?: number }
+  | { i: 'tom'; t: number; v: number; n: number; k?: TomKind; take?: number }
   | { i: 'hat'; t: number; v: number; k: HatKind; p?: number; take?: number }
   | { i: 'bass'; t: number; d: number; n: number; v: number; k: BassKind; rel?: number }
   | { i: 'pad'; t: number; d: number; n: number[]; k: PadKind; cut: [number, number]; g?: number; rel?: number }
@@ -151,7 +179,8 @@ export type Ev =
   /**
    * A plucked note. The fretting hand's techniques: `slur`, hammered on or pulled off from the note before
    * rather than picked; `slide`, slid into from this many semitones away; `squeak`, how loud the hand squeaks
-   * along a wound string as it shifts to the note (0 to 1).
+   * along a wound string as it shifts to the note (0 to 1); `swell`, seconds a note takes to swell in with no
+   * attack at all (a volume pedal, an EBow).
    */
   | {
     i: 'string';
@@ -165,6 +194,7 @@ export type Ev =
     slur?: boolean;
     slide?: number;
     squeak?: number;
+    swell?: number;
   }
   | { i: 'mallet'; t: number; n: number; v: number; k: MalletKind; p?: number; lead?: boolean }
   /** `pedal`: the sustain pedal is down while it sounds, so the undamped strings answer it. */

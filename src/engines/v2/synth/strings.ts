@@ -8,9 +8,9 @@
 //   note darkens as it decays instead of fading evenly.
 // - Two polarizations: a second loop, a few cents apart and decaying faster, takes part of the pluck. The sum
 //   beats and decays in two stages, as a real string does.
-// - The body (acoustic guitar, harp) and the pickup (electric) are linear, so they are commuted into the
-//   excitation: they shape the first 120 ms of input to the loops rather than every output sample, which
-//   keeps a voice about as cheap as a bare loop.
+// - The body (acoustic guitar, harp), the pickup (electric) and a clean amp's tone and speaker are linear, so they
+//   are commuted into the excitation: they shape the first few tens of ms of input to the loops rather than every
+//   output sample, which keeps a voice about as cheap as a bare loop.
 // - The fretting hand: a hammered-on or pulled-off note is not picked, so it has no pick attack and a darker
 //   start; a slide glides the loop's length from the fret it starts on; a squeak is the hand's skin brushing
 //   along a wound string as it shifts, a short band of noise sweeping up.
@@ -19,7 +19,7 @@
 
 import type { Ev, StringKind } from '../types.ts';
 import type { Bus } from './bus.ts';
-import { smooth, SVF } from './dsp.ts';
+import { Chain, Chorus, type Section, smooth, SVF } from './dsp.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 
@@ -44,6 +44,15 @@ interface Model {
   pickup?: { at: number; res: readonly [number, number] };
   /** Attack transient (the finger or pick, and the body's knock): length s, low-pass Hz, level. */
   knock?: readonly [number, number, number];
+  /**
+   * The amp and speaker a clean guitar plays through, as filter sections: a clean amp is linear enough to commute into
+   * the excitation with the pickup, so its tone costs nothing per sample.
+   */
+  amp?: readonly Section[];
+  /** A light stereo chorus after the amp: base delay ms, sway ms, rate Hz, mix (see Chorus). */
+  chorus?: readonly [number, number, number, number];
+  /** Octaves the pluck's corner rises per unit of velocity (4 unless set). */
+  excVel?: number;
   /** Output gain: a note as loud (BS.1770) as the previous model's at the same velocity. */
   gain: number;
   /** Longest render, s; the last quarter fades out. */
@@ -62,6 +71,29 @@ const ELECTRIC: Model = {
   gain: 0.84,
   maxLen: 5,
 };
+
+/**
+ * A clean Fender amp into a 2x12. The speaker: a Jensen, fitted to a close-miked capture (jesterdyne's "Jensen Cab
+ * e606", Freesound, CC BY 4.0) to 1.1 dB rms from 60 Hz to 8 kHz: the low resonance, a presence peak and notch above
+ * 2 kHz, and the fall from 5 kHz. The rest fitted (1.1 dB rms, 400 Hz to 6.3 kHz, where the notes played don't decide
+ * the spectrum) to the clean openings of the references (Explosions in the Sky, April Rain, Mono): the tone stack's
+ * mid scoop at 750 Hz and the treble up (the Fender voicing), and the mic off the cone's axis, which loses the cone's
+ * presence peak near 4.6 kHz. And the bass down, as the references have it under their reverb: the speaker's low
+ * resonance left in, the guitar was 10 dB heavier at 125 Hz than they are.
+ */
+const FENDER_CLEAN: readonly Section[] = [
+  ['peak', 140, 0.9, -8],
+  ['peak', 735, 0.88, -12],
+  ['peak', 2640, 1.15, 5],
+  ['peak', 4490, 3, -11.7],
+  ['hp', 99, 1.21],
+  ['lp', 3448, 1.77],
+  ['lp', 13366, 1.5],
+  ['peak', 154, 0.7, 6.6],
+  ['peak', 2172, 5.35, 2.3],
+  ['peak', 3076, 3.24, -8],
+  ['peak', 4690, 3.3, 8],
+];
 
 const MODELS: Record<StringKind, Model> = {
   // steel-string acoustic (a Martin HD-28): partial T60 ~13 s at 90 Hz down to ~1.2 s at 5.6 kHz
@@ -94,6 +126,21 @@ const MODELS: Record<StringKind, Model> = {
   },
   // a Fender on its bridge pickup: long even sustain, flat up to the pickup's resonance
   electric: ELECTRIC,
+  // post-rock's clean guitar: a Jazzmaster or Telecaster on its middle position (brighter than the neck: the
+  // references are flat to 3 kHz), picked with a pick at any strength, with the sustain of a compressor, into a clean
+  // Fender amp and its 2x12 (FENDER_CLEAN) and a light chorus; its delays and reverb are its sends (see string())
+  clean: {
+    ...ELECTRIC,
+    beta: [0.18, 0.28],
+    exc: 3200,
+    excVel: 2,
+    t1: 14,
+    t4k: 2.2,
+    pickup: { at: 0.2, res: [3800, 1.4] },
+    amp: FENDER_CLEAN,
+    chorus: [7, 0.5, 0.7, 0.35],
+    gain: 1.42,
+  },
   // the same guitar into the amp bus (its level sets how hard it drives the amp)
   overdrive: { ...ELECTRIC, gain: 1 },
 };
@@ -244,7 +291,7 @@ function excitation(b: Bus, e: E<'string'>, m: Model, f: number): { pluck: Float
   const shape = new Float32Array(N);
   for (let i = 0; i < N; i++) shape[i] = (i < w ? 1 - w / N : -w / N) + 0.04 * b.noise.next();
   // a hammer-on or pull-off sets the string going without a pick: a softer, rounder push
-  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** (4 * (e.v - 0.7)) * (e.slur ? 0.3 : 1), sr);
+  roundOff(shape, m.exc * (f / 200) ** m.excTilt * 2 ** ((m.excVel ?? 4) * (e.v - 0.7)) * (e.slur ? 0.3 : 1), sr);
   let mean = 0;
   for (let i = 0; i < N; i++) mean += shape[i];
   mean /= N;
@@ -252,9 +299,11 @@ function excitation(b: Bus, e: E<'string'>, m: Model, f: number): { pluck: Float
   for (let i = 0; i < N; i++) rms += (shape[i] -= mean) ** 2;
   const norm = 0.25 / (Math.sqrt(rms / N) || 1);
 
-  // a body rings for a while; a pickup only adds its comb's delay and a short resonance
+  // a body rings for a while; a pickup only adds its comb's delay and a short resonance; an amp's speaker, 40 ms
   const pd = m.pickup ? Math.max(1, Math.round((m.pickup.at * sr) / f)) : 0;
-  const L = m.body ? Math.max(N + 1, Math.round(0.12 * sr)) : N + pd + Math.round(0.005 * sr);
+  const L = m.body
+    ? Math.max(N + 1, Math.round(0.12 * sr))
+    : N + pd + Math.round(0.005 * sr) + (m.amp ? Math.round(0.04 * sr) : 0);
   const pluck = new Float32Array(L);
   for (let i = 0; i < N; i++) pluck[i] = shape[i] * norm;
   if (m.pickup) {
@@ -264,8 +313,13 @@ function excitation(b: Bus, e: E<'string'>, m: Model, f: number): { pluck: Float
     const res = new SVF(sr, m.pickup.res[0], m.pickup.res[1]);
     for (let i = 0; i < L; i++) pluck[i] = res.run(pluck[i]);
   }
-  const knock = new Float32Array(m.knock && !e.slur ? L : 0);
-  if (m.knock && !e.slur) {
+  if (m.amp) {
+    const amp = new Chain(sr, m.amp);
+    for (let i = 0; i < L; i++) pluck[i] = amp.run(pluck[i]);
+  }
+  const struck = !e.slur && !e.swell;
+  const knock = new Float32Array(m.knock && struck ? L : 0);
+  if (m.knock && struck) {
     const [sec, fc, level] = m.knock;
     const kl = Math.min(L, Math.round(sec * sr));
     const a = 1 - Math.exp((-2 * Math.PI * fc) / sr);
@@ -314,33 +368,36 @@ export function string(b: Bus, e: E<'string'>): void {
     : new Loop(sr, fb, ratio * t0, ratio * m.t4k);
   const { pluck, knock } = excitation(b, e, m, f);
   const fade = 0.25 * len;
+  // a swell: the volume pedal comes up after the pick, so no attack is heard at all
+  const swell = e.swell ?? 0;
   const tick = (j: number, t: number): number => {
     const x = j < pluck.length ? pluck[j] : 0;
     const held = t < d;
     let y = A.tick((1 - share) * x, held, t) + (j < knock.length ? knock[j] : 0);
     if (B) y += B.tick(share * x, held, t);
+    if (swell && t < swell) y *= smooth(t / swell);
     return t > len - fade ? (y * (len - t)) / fade : y;
   };
   const p = e.p ?? Math.max(-0.5, Math.min(0.5, (e.n - 62) / 28));
   if (e.squeak) squeak(b, e.t, e.squeak, p);
   if (e.k === 'overdrive') {
-    // dry into the amp bus; the amp in the master adds drive, cabinet and room
+    // dry into an amp; the amps in the master add drive, cabinet and room. A guitar placed right plays through the
+    // second amp: two guitarists, double-tracked (see render's amp)
+    const into = (e.p ?? 0) > 0 ? b.AMP2 : b.AMP;
     const i0 = Math.round(e.t * sr);
     const n = Math.min(b.n - i0, Math.round(len * sr));
-    for (let j = 0; j < n; j++) b.AMP[i0 + j] += tick(j, j / sr) * e.v * m.gain * Math.min(1, (n - j) / (0.01 * sr));
-    b.ampUsed = true;
+    for (let j = 0; j < n; j++) into[i0 + j] += tick(j, j / sr) * e.v * m.gain * Math.min(1, (n - j) / (0.01 * sr));
+    if (into === b.AMP2) b.amp2Used = true;
+    else b.ampUsed = true;
     return;
   }
   const g = e.v * m.gain;
-  b.voice(
-    e.t,
-    len,
-    (j, t) => tick(j, t) * g,
-    p,
-    e.k === 'harp' ? 0.4 : 0.22,
-    e.k === 'harp' ? 0.15 : e.k === 'electric' ? 0.3 : 0.12,
-    0.3,
-  );
+  // the clean post-rock guitar lives in its delays and a big room
+  const [rv, dl] = { harp: [0.4, 0.15], electric: [0.22, 0.3], clean: [0.5, 0.55] }[e.k as string] ?? [0.22, 0.12];
+  if (m.chorus) {
+    const ch = new Chorus(sr, e.t, ...m.chorus);
+    b.stereo(e.t, len, (j, t) => ch.run(tick(j, t) * g), () => ch.side, p, rv, dl, 0.3);
+  } else b.voice(e.t, len, (j, t) => tick(j, t) * g, p, rv, dl, 0.3);
 }
 
 /**

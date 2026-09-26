@@ -19,8 +19,9 @@ import { type Ev, isMelody, type StyleId, TAKES } from '../../../src/engines/v2/
 Deno.test('movements run as long as the listener chose', () => {
   const bounds = { short: [95, 175], standard: [165, 265], long: [265, 400] } as const;
   for (const length of ['short', 'standard', 'long'] as const) {
-    const [lo, hi] = bounds[length];
     for (const style of STYLE_IDS) {
+      // post-rock runs longer than the chosen length (see StyleDef.stretch)
+      const [lo, hi] = bounds[length].map((x) => x * (STYLES[style].stretch ?? 1));
       const song = new Song(`length-${style}`, [style], length);
       for (let m = 0; m < 8; m++) {
         const d = song.movement(m).duration;
@@ -377,7 +378,7 @@ Deno.test("a drummer's strokes are never the same take twice in a row; a drum ma
       const last = new Map<string, number>();
       for (const e of s.events.filter(isHit)) {
         assert(e.take !== undefined && e.take >= 0 && e.take < TAKES, `${style} ${e.i} without a take`);
-        const part = `${e.i}:${'k' in e ? e.k : e.i === 'tom' ? e.n : ''}`;
+        const part = `${e.i}:${e.i === 'tom' ? e.n : 'k' in e ? e.k : ''}`;
         assertNotEquals(last.get(part), e.take, `${style} ${part} repeats a take at ${e.t.toFixed(2)} s`);
         last.set(part, e.take);
       }
@@ -413,19 +414,28 @@ Deno.test('takes of a stroke differ, a take is the same every time, and a softer
 });
 
 Deno.test('a drummer plays ghost notes well under the backbeat, and each limb where the feel puts it', () => {
-  const song = new Song('feel-ember', ['ember']);
-  const mv = song.movement(0);
-  const sections = mv.sections.map((_, k) => composeSection(song, mv.firstSection + k));
-  const snares = sections.flatMap((s) => s.events.filter((e) => e.i === 'snare').map((e) => e.v)).sort((a, b) => a - b);
+  // lo-fi's grooves are full of ghost notes
+  const snares = [0, 1, 2, 3].flatMap((k) => sectionsOf(`feel-haze-${k}`, 'haze'))
+    .flatMap((s) => s.events.filter((e) => e.i === 'snare').map((e) => e.v))
+    .sort((a, b) => a - b);
   const ghost = snares[Math.floor(snares.length * 0.1)] / snares[Math.floor(snares.length * 0.9)];
   assert(ghost < 0.3, `ghost notes are ${ghost.toFixed(2)} of the backbeat`);
-  // a rock drummer pushes on the cymbals and leans back on the backbeat
-  // against the written grid: the band's tempo moves the grid itself
+  // downtempo's shaker drives ahead of the kick and its backbeat leans back
+  const song = new Song('feel-garden', ['garden']);
+  const mv = song.movement(0);
+  const sections = mv.sections.map((_, k) => composeSection(song, mv.firstSection + k));
+  // against the written (and swung) grid: the band's tempo moves the grid itself
   const s16 = 60 / mv.bpm / 4;
+  const swung = (step: number) => step * s16 + (step % 2 ? mv.swing * s16 : 0);
   const offsets = (f: (e: Ev) => boolean) =>
     sections.flatMap((s) => {
       const clock = new Clock(mv, s.local);
-      return s.events.filter(f).map((e) => clock.written(e.t)).map((t) => t - Math.round(t / s16) * s16);
+      return s.events.filter(f).map((e) => clock.written(e.t)).map((t) => {
+        const step = [Math.floor(t / s16), Math.ceil(t / s16)].reduce((a, b) =>
+          Math.abs(t - swung(b)) < Math.abs(t - swung(a)) ? b : a
+        );
+        return t - swung(step);
+      });
     });
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
   const kick = mean(offsets((e) => e.i === 'kick'));
@@ -850,4 +860,33 @@ Deno.test('some pieces sway in three: waltzes and 6/8, with bars of three beats 
   const tune = waltz.events.filter(isMelody).map((e) => clock.written(e.t) / beat);
   const onBeat = tune.filter((q) => Math.abs(q - Math.round(q)) < 0.06).length;
   assert(tune.length > 6 && onBeat / tune.length > 0.5, `${onBeat} of ${tune.length} notes on a beat`);
+});
+
+Deno.test('post-rock rises in long waves: quiet without drums, a crescendo, the theme tremolo-picked over a wall', () => {
+  for (const seed of ['wave-a', 'wave-b', 'wave-c']) {
+    const song = new Song(seed, ['ember'], 'standard');
+    const mv = song.movement(0);
+    assert(mv.duration > 265, `${seed} lasts ${mv.duration.toFixed(0)} s`);
+    // long parts, not a string of short rounds
+    const sounding = mv.sections.filter((s) => s.role !== 'rest');
+    assert(sounding.length <= 12, `${seed} has ${sounding.length} sections`);
+    // a run of builds climbs
+    const k = mv.sections.findIndex((s, i) => s.role === 'build' && mv.sections[i + 1]?.role === 'build');
+    if (k >= 0) assert(mv.sections[k + 1].energy > mv.sections[k].energy);
+    mv.sections.forEach((sec, i) => {
+      const s = composeSection(song, mv.firstSection + i);
+      const drums = s.events.filter((e) => ['kick', 'snare', 'hat', 'tom'].includes(e.i));
+      if (sec.role === 'intro' || sec.role === 'verse' || sec.role === 'break') {
+        assertEquals(drums.length, 0, `${seed}: drums in the ${sec.role}`);
+      }
+      if (sec.role === 'drop' || sec.role === 'chorus') {
+        const wall = s.events.filter((e): e is Extract<Ev, { i: 'string' }> => e.i === 'string' && e.k === 'overdrive');
+        assert(wall.some((e) => (e.p ?? 0) < 0) && wall.some((e) => (e.p ?? 0) > 0), 'the wall is one guitarist');
+        // the tune: the same note picked again and again
+        const tune = s.events.filter(isMelody).map((e) => e as Extract<Ev, { i: 'string' }>).sort((a, b) => a.t - b.t);
+        const again = tune.filter((e, j) => j > 0 && e.n === tune[j - 1].n && e.t - tune[j - 1].t < 0.2).length;
+        assert(tune.length > 20 && again / tune.length > 0.5, `${seed}: ${again} of ${tune.length} strokes repeat`);
+      }
+    });
+  }
 });

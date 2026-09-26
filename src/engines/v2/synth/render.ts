@@ -2,9 +2,9 @@
 // master chain. Sections are rendered independently and overlap by their tails when played, so any
 // section can be rendered (and heard) without the ones before it.
 
-import { type Ev, isMelody, type Mix, type Score } from '../types.ts';
+import { type AmpTone, type Ev, isMelody, type Mix, type Score } from '../types.ts';
 import { Bus } from './bus.ts';
-import { freeverb, lufs, Noise, SVF, TAU } from './dsp.ts';
+import { analog, Chain, freeverb, hall, lufs, Noise, Oversampled, type Section, softClip, SVF, TAU } from './dsp.ts';
 import * as I from './instruments.ts';
 import { bell, mallet, perc, piano } from './modal.ts';
 import { string } from './strings.ts';
@@ -69,10 +69,10 @@ export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendere
   b.duck = I.sidechain(b, kicks);
   const of = (s: Stem) => score.events.filter((e) => stemOf(e) === s);
   const mix = score.movement.mix;
-  playAll(b, of('bed'));
+  playAll(b, of('bed'), mix.amp);
   widen(b, mix.width);
   const bed = dryLufs(b);
-  playAll(b, of('fx'));
+  playAll(b, of('fx'), mix.amp);
   const against = (ref: number, offset: number, lo: number, hi: number) => (own: number) =>
     Number.isFinite(ref) && Number.isFinite(own) ? Math.min(hi, Math.max(lo, 10 ** ((ref + offset - own) / 20))) : 1;
   stem(b, score, of('drums'), 0x1b873593, against(bed, mix.drums, 0.25, 2));
@@ -90,16 +90,17 @@ export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendere
   return { left: b.L, right: b.R, sampleRate, lufs: measured, gain };
 }
 
-function playAll(b: Bus, events: readonly Ev[]): void {
+function playAll(b: Bus, events: readonly Ev[], tone: AmpTone): void {
   for (const e of events) {
     const play = PLAY[e.i] as ((b: Bus, e: Ev) => void) | undefined;
     play?.(b, e);
   }
-  if (b.ampUsed) {
-    amp(b);
+  if (b.ampUsed || b.amp2Used) {
+    amp(b, tone);
     // processed: a later playAll on this bus (the fx after the bed) must not run it again
     b.AMP.fill(0);
-    b.ampUsed = false;
+    b.AMP2.fill(0);
+    b.ampUsed = b.amp2Used = false;
   }
 }
 
@@ -154,7 +155,7 @@ function stem(b: Bus, score: Score, events: readonly Ev[], salt: number, level: 
   if (!events.length) return;
   const s = new Bus(b.sr, score.duration + score.tail, (score.noiseSeed ^ salt) >>> 0, score.movement.tone, b.a4);
   s.duck = b.duck;
-  playAll(s, events);
+  playAll(s, events, score.movement.mix.amp);
   const g = level(dryLufs(s));
   for (const k of ['L', 'R', 'ML', 'MR', 'REV', 'DLY'] as const) {
     const from = s[k];
@@ -229,7 +230,8 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
 
   // echoes: dotted-eighth-ish ping-pong, darker and thinner each time, feeding a little into the room
   const beat = 60 / score.bpm;
-  pingpong(b, mix.delayBeats * beat, mix.delayFeedback, mix.delayWet);
+  if (mix.echo === 'tape') tapeEcho(b, mix.delayBeats * beat, mix.delayFeedback, mix.delayWet);
+  else pingpong(b, mix.delayBeats * beat, mix.delayFeedback, mix.delayWet);
   // the room hears nothing below 350 Hz (no mud) and starts 45 ms late (the dry attack stays clear)
   const rl = new SVF(sr, 7000);
   const rh = new SVF(sr, 350);
@@ -238,7 +240,9 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
     REV[i] = rh.hp;
   }
   early(b, mix);
-  freeverb(sr, REV, L, R, mix.room, mix.reverb, Math.round(0.045 * sr), 0.35);
+  const pre = Math.round(0.045 * sr);
+  if (mix.hall) hall(sr, REV, L, R, { ...hallFor(mix.room), wet: mix.reverb, pre, shimmer: mix.shimmer ?? 0 });
+  else freeverb(sr, REV, L, R, mix.room, mix.reverb, pre, 0.35);
   for (let i = 0; i < n; i++) {
     if (hush[i] < 1) {
       L[i] *= hush[i];
@@ -381,47 +385,251 @@ function air(b: Bus, score: Score, level: number): void {
 /** Scales the shaped noise above to unit rms. */
 const AIR_NORM = 1.18;
 
+/** The crunch amp: gain, mid push before the drive, mid scoop after it, cabinet corner, presence, low cut. */
+const CRUNCH = { drive: 16, mids: 1.5, scoop: 0.8, cab: 8000, presence: 0.5, hp: 110 };
+
 /**
- * The guitar amp: a high-pass (no flub) and a pre-emphasis so the drive bites in the mids, then hard, slightly
+ * A crunchy rock amp: a high-pass (no flub) and a pre-emphasis so the drive bites in the mids, then hard, slightly
  * asymmetric clipping that holds a note up the way a real amp's compression does, a mid scoop (the tone stack),
- * and a speaker cabinet: 24 dB/oct above 8 kHz with a presence peak near 3.5 kHz. A doubled, slightly delayed
- * copy on the other side gives width.
+ * and a speaker cabinet: 24 dB/oct above 8 kHz with a presence peak near 3.5 kHz.
  */
-function amp(b: Bus): void {
-  const { sr, n, AMP, ML, MR, REV, DLY } = b;
-  const hp = new SVF(sr, 110, 0.7);
+export function crunch(sr: number, n: number, inp: Float32Array): Float32Array {
+  const A = CRUNCH;
+  const hp = new SVF(sr, A.hp, 0.7);
   const pre = new SVF(sr, 900, 0.7);
   const scoop = new SVF(sr, 550, 0.6);
-  const cab1 = new SVF(sr, 8000, 0.54);
-  const cab2 = new SVF(sr, 8000, 1.31);
+  const cab1 = new SVF(sr, A.cab, 0.54);
+  const cab2 = new SVF(sr, A.cab, 1.31);
   const presence = new SVF(sr, 3500, 1.2);
-  const dbl = Math.round(0.013 * sr);
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     // a tiny alternating offset keeps the filters out of subnormal numbers in the silences between notes, where
     // tanh(x + 0.3) - tanh(0.3) rounds to exactly 0 and the states decay toward 0 (30x slower on x86)
-    hp.run(AMP[i] + (i & 1 ? 1e-15 : -1e-15));
+    hp.run(inp[i] + (i & 1 ? 1e-15 : -1e-15));
     pre.run(hp.hp);
-    const x = hp.hp + 1.5 * pre.bp;
-    const clipped = Math.tanh(16 * x + 0.3) - Math.tanh(0.3);
+    const x = hp.hp + A.mids * pre.bp;
+    const clipped = Math.tanh(A.drive * x + 0.3) - Math.tanh(0.3);
     scoop.run(clipped);
-    // the scoop's band-pass peaks at Q: take 80% of the band out around 550 Hz (-14 dB)
-    const toned = clipped - (0.8 * scoop.bp) / 0.6;
+    // the scoop's band-pass peaks at Q: take out A.scoop of the band around 550 Hz
+    const toned = clipped - (A.scoop * scoop.bp) / 0.6;
     presence.run(toned);
-    out[i] = (cab2.run(cab1.run(toned)) + (0.5 * presence.bp) / 1.2) * 0.2;
+    out[i] = (cab2.run(cab1.run(toned)) + (A.presence * presence.bp) / 1.2) * 0.2;
   }
+  return out;
+}
+
+/**
+ * A Marshall 1960AX 4x12 (Celestion Greenback G12M-25s) close-miked with an SM57: the mean of four CC0 captures
+ * (Jester Dyne's Emerald pack) fitted with biquads to 0.7 dB rms from 60 Hz to 8 kHz. The low-end resonance, the
+ * dip at 440 Hz, the presence around 2.4 kHz and the notch just above it, and a steep fall from 5 kHz.
+ */
+export const GREENBACK_4X12: readonly Section[] = [
+  ['hp', 153, 1.64],
+  ['lp', 4067, 2.35],
+  ['lp', 11853, 0.4],
+  ['peak', 104, 1.49, 8.8],
+  ['peak', 436, 2.29, -1.5],
+  ['peak', 1251, 8, 3.7],
+  ['peak', 2475, 0.5, -3],
+  ['peak', 2396, 3.63, 5.5],
+  ['peak', 2917, 8, -6.2],
+];
+
+/**
+ * The other guitarist's rig: a 4x12 with Celestion Vintage 30s, close-miked with an SM57: the mean of two CC0 captures
+ * (Jester Dyne's Brutal pack) fitted to 0.8 dB rms from 60 Hz to 8 kHz. Less low resonance than the Greenbacks, more
+ * bite at 2.3 kHz, and a steeper fall above 6 kHz: two players on two different rigs, as double-tracked walls are.
+ */
+export const V30_4X12: readonly Section[] = [
+  ['hp', 147, 1.16],
+  ['lp', 4176, 3],
+  ['lp', 9082, 0.4],
+  ['peak', 110, 2.73, 5.4],
+  ['peak', 639, 8, -5],
+  ['peak', 1221, 5.71, 3.6],
+  ['peak', 1475, 7.66, -4.8],
+  ['peak', 2279, 3.88, 7.8],
+  ['peak', 4950, 0.5, -9.5],
+  ['peak', 5612, 2.97, 12],
+];
+
+/**
+ * The Big Muff Pi's tone stack at noon, from the circuit (J.L., "Re-engineering the Big Muff Pi", 2014): a 39k/10 nF
+ * low-pass and a 4 nF/22k high-pass mixed by the 100k tone pot. Its notch sits at 1 kHz, 8 dB under its ends.
+ */
+const MUFF_TONE = (() => {
+  const [RT, CT, CB, RB, R1, R2] = [39e3, 10e-9, 4e-9, 22e3, 50e3, 50e3];
+  return {
+    b: [CB * CT * R2 * RB * RT, CB * RB * (R1 + R2 + RT), R1 + RB],
+    a: [
+      CB * CT * RB * RT * (R1 + R2),
+      CB * R1 * RB + CB * R2 * RB + CB * RB * RT + CT * R1 * RT + CT * R2 * RT + CT * RB * RT,
+      R1 + R2 + RB + RT,
+    ],
+  };
+})();
+
+/** How the wall drives: the Muff's three stages' gains, the diodes' knee (V), the amp's drive, and the output level. */
+const MUFF = { boost: 12, clip: 40, knee: 0.6, amp: 1.6, level: 0.22 };
+
+/**
+ * Post-rock's wall: a Big Muff Pi into a big amp and a 4x12. Before its tone stack the Muff is three transistor
+ * stages, each with a 470 pF cap across its 470k feedback resistor (a one-pole low-pass at 720 Hz on its gain): a
+ * booster, then two stages with a pair of diodes in the feedback that clip softly at their knee, so the note is
+ * squared twice over and holds at full level for as long as the string rings; they run at twice the rate, so the
+ * harmonics the clipping makes don't fold back. Then the tone stack's mid notch (a fourth stage after it only makes up
+ * the level), the power amp's gentle saturation, and the cabinet.
+ */
+export function wall(sr: number, n: number, inp: Float32Array, cabinet = GREENBACK_4X12, gain = 1): Float32Array {
+  const hp = new SVF(sr, 40, 0.7);
+  const os = new Oversampled();
+  const a = 1 - Math.exp((-TAU * 720) / (2 * sr));
+  const { boost, clip, knee } = MUFF;
+  const s = new Float64Array(3);
+  const muff = (x: number) => {
+    s[0] += a * (x - s[0]);
+    // the booster clips only at its rails (about 4 V)
+    s[1] += a * (4 * softClip((boost * s[0]) / 4) - s[1]);
+    s[2] += a * (knee * softClip((clip * s[1]) / knee) - s[2]);
+    return knee * softClip((clip * s[2]) / knee);
+  };
+  const tone = analog(sr, MUFF_TONE.b, MUFF_TONE.a, 1000);
+  const cab = new Chain(sr, cabinet);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    hp.run(inp[i] + (i & 1 ? 1e-15 : -1e-15));
+    const t = tone.run(os.run(hp.hp, muff));
+    out[i] = cab.run(softClip(MUFF.amp * t)) * MUFF.level * gain;
+  }
+  return out;
+}
+
+/**
+ * The guitar amp (see Mix.amp): crunch() or wall(). One amp is widened by a doubled, slightly delayed copy on the
+ * other side; two (a guitarist on each side) are a real double-track.
+ */
+function amp(b: Bus, tone: AmpTone): void {
+  const { sr, n, ML, MR, REV, DLY } = b;
+  // the wall's guitarists play different rigs: the one on the right through the Vintage 30s
+  // (3 dB up, as loud as the other: they have less low resonance)
+  const run = (inp: Float32Array, cab: readonly Section[], gain: number) =>
+    tone === 'fuzz' ? wall(sr, n, inp, cab, gain) : crunch(sr, n, inp);
+  const left = b.ampUsed ? run(b.AMP, GREENBACK_4X12, 1) : null;
+  const right = b.amp2Used ? run(b.AMP2, V30_4X12, 1.41) : null;
+  const dbl = Math.round(0.013 * sr);
   for (let i = 0; i < n; i++) {
     const d = 1 - 0.3 * (1 - b.duck[i]);
-    const o = out[i] * d;
-    const other = (i >= dbl ? out[i - dbl] : 0) * d;
-    ML[i] += o * 0.9 + other * 0.35;
-    MR[i] += other * 0.9 + o * 0.35;
-    REV[i] += o * 0.2;
-    DLY[i] += o * 0.1;
+    let l: number;
+    let r: number;
+    if (left && right) {
+      // two guitarists, one on each side, a little of each in the other's room
+      l = (left[i] * 0.95 + right[i] * 0.2) * d;
+      r = (right[i] * 0.95 + left[i] * 0.2) * d;
+    } else {
+      const out = (left ?? right)!;
+      const o = out[i] * d;
+      const other = (i >= dbl ? out[i - dbl] : 0) * d;
+      l = o * 0.9 + other * 0.35;
+      r = other * 0.9 + o * 0.35;
+    }
+    ML[i] += l;
+    MR[i] += r;
+    const m = left && right ? (l + r) / 2 : (left ?? right)![i] * d;
+    REV[i] += m * 0.2;
+    DLY[i] += m * 0.1;
   }
 }
 
-function pingpong(b: Bus, time: number, fb: number, wet: number): void {
+/**
+ * The hall's decay for a movement's `room`: freeverb's at the same setting (its combs average 31 ms and feed back
+ * room * 0.28 + 0.7), so a style keeps the size it was given; 4 kHz dies in 40% of the time, as it does in freeverb
+ * with its damping at 0.35 (both measured: T30 per octave within 0.3 s from 125 Hz to 8 kHz).
+ */
+export function hallFor(room: number): { t60: number; t60hi: number } {
+  const t60 = (-3 * 0.031) / Math.log10(room * 0.28 + 0.7);
+  return { t60, t60hi: 0.4 * t60 };
+}
+
+/**
+ * Tape echo: what a tape transport does to a delay. The transport wows and flutters, so a repeat comes back a little
+ * early or late and its pitch sways (0.2% at 0.55 Hz and 0.05% at 5.7 Hz, a little different on each side, so the
+ * repeats also chorus against each other). The heads lose the lows and highs (a band per pass, 100 Hz to 3.8 kHz:
+ * each repeat darker and thinner than the one before), and the tape saturates softly as each repeat is recorded again.
+ * Ping-ponged, as pingpong() is.
+ */
+export function tapeEcho(
+  b: Pick<Bus, 'sr' | 'n' | 'L' | 'R' | 'REV' | 'DLY'>,
+  time: number,
+  fb: number,
+  wet: number,
+): void {
+  const { sr, n, L, R, REV, DLY } = b;
+  const D = Math.max(4, time * sr);
+  // delay swings in seconds for the pitch sways above: a sway of p at rate r moves the delay by p / (2 pi r)
+  const wow = 0.002 / (TAU * 0.55);
+  const flutter = 0.0005 / (TAU * 5.7);
+  const size = Math.ceil(D + (wow + flutter) * sr) + 4;
+  const bl = new Float64Array(size);
+  const br = new Float64Array(size);
+  const band = () => ({ lp: new SVF(sr, 3800, 0.6), hp: new SVF(sr, 100, 0.7) });
+  const hl = band();
+  const hr = band();
+  // the tape's saturation: transparent at the send's usual level, a soft knee above it
+  const sat = (x: number) => 0.8 * softClip(x / 0.8);
+  const read = (buf: Float64Array, w: number, d: number) => {
+    let r = w - d;
+    if (r < 0) r += size;
+    const i = r | 0;
+    const f = r - i;
+    const x0 = buf[i];
+    const x1 = buf[i + 1 < size ? i + 1 : i + 1 - size];
+    const x2 = buf[i + 2 < size ? i + 2 : i + 2 - size];
+    const xm = buf[i > 0 ? i - 1 : size - 1];
+    // 4-point Hermite: the swaying read doesn't dull or rough the repeats
+    const c1 = 0.5 * (x1 - xm);
+    const c2 = xm - 2.5 * x0 + 2 * x1 - 0.5 * x2;
+    const c3 = 0.5 * (x2 - xm) + 1.5 * (x0 - x1);
+    return ((c3 * f + c2) * f + c1) * f + x0;
+  };
+  // the four sways (left wow and flutter, right wow and flutter) as rotating phasors: rate Hz, phase, depth s
+  const SWAYS = [[0.55, 0, wow], [5.7, 1, flutter], [0.61, 2, wow], [6.3, 2.5, flutter]] as const;
+  const sways = SWAYS.map(([f, ph, a]) => ({
+    c: Math.cos(ph),
+    s: Math.sin(ph),
+    rc: Math.cos((TAU * f) / sr),
+    rs: Math.sin((TAU * f) / sr),
+    a: a * sr,
+  }));
+  const sway = (k: number) => {
+    const o = sways[k];
+    const s = o.s * o.rc + o.c * o.rs;
+    o.c = o.c * o.rc - o.s * o.rs;
+    o.s = s;
+    return o.a * s;
+  };
+  let w = 0;
+  for (let i = 0; i < n; i++) {
+    const dl = D + sway(0) + sway(1);
+    const dr = D + sway(2) + sway(3);
+    hl.hp.run(hl.lp.run(read(bl, w, dl)));
+    hr.hp.run(hr.lp.run(read(br, w, dr)));
+    const yl = hl.hp.hp;
+    const yr = hr.hp.hp;
+    bl[w] = sat(DLY[i] + yr * fb);
+    br[w] = sat(yl * fb);
+    w = w + 1 < size ? w + 1 : 0;
+    L[i] += yl * wet;
+    R[i] += yr * wet;
+    REV[i] += (yl + yr) * 0.12;
+  }
+}
+
+export function pingpong(
+  b: Pick<Bus, 'sr' | 'n' | 'L' | 'R' | 'REV' | 'DLY'>,
+  time: number,
+  fb: number,
+  wet: number,
+): void {
   const { sr, n, L, R, REV, DLY } = b;
   const D = Math.max(1, Math.round(time * sr));
   const bl = new Float32Array(D);

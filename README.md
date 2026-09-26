@@ -11,12 +11,12 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   the composer version, the length, the movement and the second you're at:
   `#seed=amber-quiet-harbor&v=2&len=long&m=3&t=42`.
 - **An endless journey.** The song is a chain of movements of about two, three to four, or five to six minutes, as the
-  listener chooses. Each has a style, a key, a tempo and a form built from intros, verses, pre-choruses, choruses,
-  bridges, solos, builds, drops, breaks and outros: song forms, AABA, a theme with a contrasting middle, one long
-  crescendo. Keys move to close neighbours; styles mostly to related ones, never the same twice in a row and rarely one
-  heard in the last few pieces, and a piece avoids the tempo, chords and lead voice of recent ones in its style. A
-  movement may end by ringing out into a few seconds of rest, like the gap between album tracks, fade, hand over with a
-  reverse swell, or stop the tape.
+  listener chooses (post-rock takes longer, for its long crescendos). Each has a style, a key, a tempo and a form built
+  from intros, verses, pre-choruses, choruses, bridges, solos, builds, drops, breaks and outros: song forms, AABA, a
+  theme with a contrasting middle, one long crescendo. Keys move to close neighbours; styles mostly to related ones,
+  never the same twice in a row and rarely one heard in the last few pieces, and a piece avoids the tempo, chords and
+  lead voice of recent ones in its style. A movement may end by ringing out into a few seconds of rest, like the gap
+  between album tracks, fade, hand over with a reverse swell, or stop the tape.
 - **Written, not random.** Each movement invents a hook in its style's idiom (a lyrical line, a trance riff, a sparse
   film theme) with a planned contour: one climax, the rest reached by step, and a character of its own (busy or
   spacious, stepping or leaping, entering on the beat or just after it, sometimes pentatonic). Its verses may sing the
@@ -140,5 +140,9 @@ Karjalainen's loss and polarization models), and the ITU-R BS.1770 loudness meas
 
 The instrument models were fitted to measurements of recordings (used only for measurement, not distributed): the
 University of Iowa Musical Instrument Samples, VSCO 2 Community Edition and VCSL (CC0), FreePats (CC0), the Discord SFZ
-GM bank (Martin HD-28 by Jeff Learman, CC0), and Freesound packs by tim.kahn (CC BY 4.0) and hollandm (CC0). Melody
-statistics were checked against the POP909 dataset (MIT).
+GM bank (Martin HD-28 by Jeff Learman, CC0), Big Rusty Drums by Karoryfer Samples (CC0, the acoustic drum kit), Jester
+Dyne Productions' Emerald and Brutal cabinet packs (CC0) and "Jensen Cab e606 right.wav" by jesterdyne
+(freesound.org/s/116748, CC BY 4.0) for the guitar cabinets, and Freesound packs by tim.kahn (CC BY 4.0) and hollandm
+(CC0). Melody statistics were checked against the POP909 dataset (MIT). The fuzz follows the published analysis of the
+Big Muff Pi circuit, the tape echo Chowdhury's and Arnardottir, Abel and Smith's models, and the hall reverb Jot's
+feedback delay networks with Dattorro's diffusers.

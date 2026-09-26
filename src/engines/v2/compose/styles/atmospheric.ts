@@ -22,18 +22,24 @@ import {
 import {
   arp,
   arpNotes,
+  bassFigure,
   crash,
+  droneVoicing,
   drums,
+  EIGHTHS,
   organChords,
   padChords,
   pianoBar,
   pick,
+  pickNotes,
   runRiser,
   runRoll,
   stab,
   sustainedBass,
   tomFill,
+  tremolo,
 } from '../parts.ts';
+import { phrase } from '../melody.ts';
 
 // ------------------------------------------------------------------ drift: ambient
 
@@ -291,138 +297,197 @@ export function cathedral(ctx: Ctx): void {
 
 // ------------------------------------------------------------------ ember: post-rock
 
-const EMBER_LEADS: Voice[] = [
-  'string:electric',
-  'mallet:vibes',
-  'bell',
-  'mallet:kalimba',
-  'piano',
-  'string:guitar',
-  'wind:hum',
-];
+// ------------------------------------------------------------------ ember: post-rock
+//
+// Written from the references (Explosions in the Sky, Mono, April Rain): a piece is one or two waves. A quiet theme
+// on a clean guitar drenched in dotted-eighth delay, over chords swelled in with no attack and no drums at all; a
+// long crescendo (the floor tom and the kick, the guitar's arpeggio thickening, the bass arriving, the fuzz wall
+// halfway, a roll at the end); a climax held for a long time, the theme tremolo-picked and doubled an octave up over
+// a double-tracked wall and crashes ridden like a ride; then a sudden drop to almost nothing, and the next wave.
 
 export function ember(ctx: Ctx): void {
   const { bars, mrng } = ctx;
-  const { last } = halves(ctx);
-  const { a: hook, b: hookB, c: own } = motifs(ctx);
-  const verse = versePlan(ctx, 'hook');
-  const lead = voiceFrom(ctx, EMBER_LEADS);
-  const second = voiceFrom(ctx, ['mallet:vibes', 'bell', 'mallet:kalimba'], lead);
-  const tremolo = mrng.fork('tremolo').chance(0.5);
-  const rim = { kick: 'big', snare: 'rim', sc: 0.25 } as const;
+  const { a: theme, b: themeB } = motifs(ctx);
+  const glock = mrng.fork('glock').chance(0.5);
+  const piano = mrng.fork('piano').chance(0.35);
   const g = grooveFor(ctx, inTime(ctx, EMBER_TIMES));
-  const full = { kick: 'big', snare: 'big', sc: 0.35 } as const;
-  // the clean guitar that carries the piece: a delayed arpeggio, or tremolo-picked chord tones
-  // the clean guitar that carries the piece, at the density the form asks for: space (quarters) in intros,
-  // bridges and breaks, the arpeggio in verses, the full figure (tremolo, or the arpeggio in 16ths) in climaxes.
-  // The move from picking to tremolo is post-rock's crescendo.
-  const clean = (b: number, v: number, density: 0 | 1 | 2 = 1) => {
-    if (density === 0) return pick(ctx, b, 'electric', [0, -1, 3, -1, 4, -1, 5, -1], 2, v, 52);
-    if (density === 1) return pick(ctx, b, 'electric', [0, 3, 4, 5, 3, 4], 2, v, 52);
-    // the climax: the arpeggio in 16ths across the chord (re-plucking one note on every 16th sounds like a
-    // machine, not like tremolo picking)
-    pick(ctx, b, 'electric', tremolo ? [3, 4, 5, 4, 3, 4, 5, 4] : [0, 3, 4, 5, 3, 4, 5, 3], 1, v * 0.8, 52);
-  };
-  // the wall of guitars: power chords strummed on beats 1 and 3 and left to ring, a wash under the melody
-  // rather than a chug (under heavy drive a third or a tenth intermodulates into mud)
-  const wall = (b: number, v: number) => {
-    const r = ctx.root(ctx.chordAt(b));
-    const low = r < 40 ? r + 12 : r;
-    const ns = [low, low + 7, low + 12];
-    for (const s of ctx.strongs) {
-      for (const [k, n] of ns.entries()) {
+  // a drummer on an acoustic kit in a big room; post-rock records don't pump
+  const heavy = {
+    kit: { kick: 'acoustic', snare: 'acoustic', acoustic: true, sc: 0.05 },
+    bass: 'saw',
+    bassGain: 0,
+    withBass: false,
+  } as const;
+  const x = (b: number) => ctx.runAt(b / bars);
+  const swellRng = ctx.rng.fork('swells');
+
+  // chords swelled in on the clean guitar, one swell a chord, ringing on into the delay: the drone voicing's upper
+  // notes, so the open strings on top never change
+  const swells = (v: number, from = 0, to = bars) => {
+    for (const slot of ctx.chords) {
+      if (slot.bar < from || slot.bar >= to) continue;
+      droneVoicing(ctx, slot).slice(1).forEach((n, k) =>
         ctx.push({
           i: 'string',
-          t: ctx.barAt(b, s) + 0.012 * k,
+          t: ctx.barAt(slot.bar) + 0.04 * k,
           n,
-          v: v * (s ? 0.8 : 1),
-          k: 'overdrive',
-          d: ctx.s16 * (ctx.spb / ctx.strongs.length),
-        });
+          v: v * (1 - 0.08 * k),
+          k: 'clean',
+          d: Math.min(slot.bars, to - slot.bar) * ctx.bar,
+          swell: swellRng.range(0.5, 1.1),
+          p: [-0.35, 0.35, -0.15, 0.15, 0][k % 5],
+        })
+      );
+    }
+  };
+  // two clean guitars that interlock through the dotted-eighth delay: the first picks eighths through the chord
+  // (a few notes a bar when quiet), the second rings the drones on a dotted grid against it, three against four
+  const shimmer = (b: number, v: number, dense = false) => {
+    const ns = droneVoicing(ctx, ctx.chordAt(b));
+    if (dense) pickNotes(ctx, b, 'clean', ns, [0, 2, 3, 4, 3, 2], 2, v, -0.4);
+    else pickNotes(ctx, b, 'clean', ns, [0, -1, -1, 3, -1, -1, 2, -1], 4, v, -0.4);
+  };
+  const interlock = (b: number, v: number) => {
+    const ns = droneVoicing(ctx, ctx.chordAt(b));
+    const top = ns.slice(-3);
+    pickNotes(ctx, b, 'clean', top, [2, 1, 0, 1], ctx.mv.meter === '4/4' ? 6 : 4, v, 0.45);
+  };
+  // the wall: power chords held through each chord, a guitarist each side
+  const wall = (v: number, from = 0, to = bars) => {
+    for (const slot of ctx.chords) {
+      if (slot.bar + slot.bars <= from || slot.bar >= to) continue;
+      const at = Math.max(from, slot.bar);
+      const r = ctx.root(slot);
+      const low = r < 40 ? r + 12 : r;
+      for (const side of [-0.9, 0.9]) {
+        [low, low + 7, low + 12].forEach((n, k) =>
+          ctx.push({
+            i: 'string',
+            t: ctx.barAt(at) + 0.012 * k + (side > 0 ? 0.009 : 0),
+            n,
+            v,
+            k: 'overdrive',
+            d: (Math.min(slot.bar + slot.bars, to) - at) * ctx.bar,
+            p: side,
+          })
+        );
       }
     }
+  };
+  // the theme, slow, on the delay guitar (a glockenspiel an octave up, sometimes)
+  const line = () => phrase(ctx, theme, 0, bars, { center: 4, lo: 0, hi: 11, stretch: 2 }, 'period');
+  const stateTheme = (gain: number) => {
+    const ns = line();
+    play(ctx, 'string:clean', ns, gain);
+    if (glock) play(ctx, 'bell', ns.map((n) => ({ ...n, n: n.n + 12 })), gain * 0.35, false);
+  };
+  // the theme at a climax: tremolo-picked on the lead guitar, and an octave up on the clean one
+  const soar = (v: number) => {
+    const ns = line();
+    // picked softly: a tremolo is a shimmer inside the wall, not a row of hard attacks on top of it
+    tremolo(ctx, ns, 'clean', v * 0.65, { lead: true });
+    tremolo(ctx, ns.map((n) => ({ ...n, n: n.n + 12 })), 'clean', v * 0.3, { fast: ctx.finalTurn, p: 0.3 });
   };
 
   switch (ctx.role) {
     case 'intro':
-      padChords(ctx, 'warm', { cut: (slot) => runCut(ctx, slot, 800, 2600), g: 0.55 });
-      for (let b = 0; b < bars; b++) clean(b, 0.35 + 0.25 * ctx.runAt(b / bars), ctx.runAt(b / bars) < 0.5 ? 0 : 1);
-      introPreview(ctx, second, hook, { center: 4, lo: 0, hi: 12 });
+      padChords(ctx, 'warm', { cut: (slot) => runCut(ctx, slot, 500, 1200), g: 0.4 });
+      swells(0.45);
+      for (let b = Math.floor(bars / 2); b < bars; b++) shimmer(b, 0.3 + 0.2 * x(b));
+      if (piano) play(ctx, 'piano', line().filter((n) => n.t >= ctx.barAt(Math.floor(bars / 2))), 0.5, false);
       break;
     case 'verse':
-      padChords(ctx, 'warm', { cut: () => [1200, 1600], g: 0.45 });
+      padChords(ctx, 'warm', { cut: () => [700, 1000], g: 0.35 });
+      swells(0.35);
       for (let b = 0; b < bars; b++) {
-        clean(b, 0.55);
-        playGroove(ctx, g, b, { kit: rim, bass: 'round', bassGain: 0.7, gain: 0.85 });
+        shimmer(b, 0.4);
+        // the second guitar joins once the theme has been heard
+        if (ctx.returning || ctx.runBar(b) >= 8) interlock(b, 0.3);
       }
-      if (verse === 'own') sing(ctx, lead, own, { center: 4, lo: 0, hi: 11 });
-      else if (ctx.returning) sing(ctx, lead, hook, { center: 5, lo: 1, hi: 12, stretch: 2 });
+      if (ctx.returning || ctx.runBar(0) >= 8) sustainedBass(ctx, 'round', 0.45);
+      stateTheme(0.9);
       break;
-    case 'build':
-      // a build of several sections swells once: the wall of guitars arrives halfway through the whole build
-      padChords(ctx, 'strings', { cut: (slot) => runCut(ctx, slot, 1500, 5200), g: 0.5 });
-      sustainedBass(ctx, 'saw', 0.5);
+    case 'build': {
+      // one crescendo across the whole run of build sections
+      padChords(ctx, 'strings', { cut: (slot) => runCut(ctx, slot, 900, 4200), g: 0.45 });
+      // the bass holds the chords until the drums drive, then plays eighths (below)
+      const drive = Math.max(0, Math.min(bars, Math.ceil(ctx.runBars / 2 - ctx.runStartBar)));
+      if (ctx.runAt(1) > 0.25 && drive > 0) sustainedBass(ctx, 'saw', 0.5, 0, drive);
       for (let b = 0; b < bars; b++) {
-        clean(b, 0.6, ctx.runAt(b / bars) < 0.5 ? 1 : 2);
-        const x = ctx.runAt(b / bars);
-        drums(
+        playGroove(ctx, g, b, { ...heavy, gain: 0.35 + 0.65 * x(b) });
+        if (x(b) < 0.5) {
+          shimmer(b, 0.45 + 0.2 * x(b), x(b) >= 0.25);
+          interlock(b, 0.35 + 0.2 * x(b));
+        } else {
+          // the bass drives eighths into the climax
+          bassFigure(ctx, b, EIGHTHS.filter(([st]) => st < ctx.spb), 'round', 0.5 + 0.3 * x(b));
+        }
+      }
+      // past halfway the guitar tremolos the chord tones and the wall comes in
+      const half = Math.max(0, Math.min(bars, Math.ceil(ctx.runBars / 2 - ctx.runStartBar)));
+      if (half < bars) {
+        tremolo(
           ctx,
-          b,
-          { kick: x < 0.5 ? 'x.......x.......' : 'x...x...x...x...', hat: 'x.x.x.x.x.x.x.x.' },
-          full,
-          0.6 + 0.4 * x,
+          ctx.chords.filter((c) => c.bar + c.bars > half).flatMap((c) => {
+            const at = Math.max(half, c.bar);
+            const top = droneVoicing(ctx, c).slice(-2);
+            return top.map((n) => ({ t: ctx.barAt(at), d: (c.bar + c.bars - at) * ctx.bar, n, v: 0.8 }));
+          }),
+          'clean',
+          0.5,
         );
-        if (x >= 0.5) wall(b, 0.4 + 0.5 * x);
+        wall(0.55, half, bars);
       }
-      runRoll(ctx, 0.3, 0.9, 'big');
-      if (ctx.nextRole !== 'build') ctx.push({ i: 'rise', t: ctx.duration - 2 * ctx.bar, d: 2 * ctx.bar, k: 'cymbal' });
-      // the moment before the wall of sound: everything stops, even the room
-      if (ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') {
-        stopBefore(ctx, 3, false);
+      if (ctx.runAt(1) >= 0.75) runRoll(ctx, 0.3, 0.9, 'acoustic');
+      if (ctx.nextRole !== 'build') {
+        ctx.push({ i: 'rise', t: ctx.duration - 2 * ctx.bar, d: 2 * ctx.bar, k: 'cymbal' });
+        // the breath before the wall
+        if (ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') stopBefore(ctx, 2, false);
       }
-      break;
-    case 'chorus':
-    case 'drop': {
-      const big = ctx.role === 'drop';
-      if (ctx.prevRole !== ctx.role) crash(ctx, 0, 1);
-      padChords(ctx, 'strings', { cut: () => [2600, 3800], g: 0.5, transpose: 12 });
-      if (big) choir(ctx, 'a', 0.55);
-      for (let b = 0; b < bars; b++) {
-        playGroove(ctx, g, b, { kit: full, bass: 'saw', bassGain: 0.55 });
-        if (big && b % 4 === 0 && b) crash(ctx, b, 0.6);
-        wall(b, big ? 1 : 0.8);
-        clean(b, 0.5, 2);
-        if (b === last && ctx.nextRole !== ctx.role) tomFill(ctx, b, ctx.chordAt(b));
-      }
-      chorusMelody(ctx, lead, second, hook, { center: 4, lo: 0, hi: 12 });
       break;
     }
-    case 'bridge':
-      padChords(ctx, 'warm', { cut: () => [1400, 1800], g: 0.5 });
-      sustainedBass(ctx, 'round', 0.6);
-      for (let b = 0; b < bars; b++) {
-        clean(b, 0.5, 0);
-        drums(ctx, b, { kick: 'x...............', snare: '........x.......' }, rim, 0.8);
+    case 'chorus':
+    case 'drop': {
+      const final = ctx.finalTurn;
+      if (ctx.prevRole !== ctx.role) crash(ctx, 0, 1, true);
+      padChords(ctx, 'strings', { cut: () => [1600, 2400], g: 0.5 });
+      if (final) choir(ctx, 'a', 0.45);
+      sustainedBass(ctx, 'saw', 0.85);
+      wall(final ? 1 : 0.85);
+      for (let b = 0; b < bars; b++) playGroove(ctx, g, b, heavy);
+      soar(final ? 0.9 : 0.8);
+      if (ctx.nextRole !== ctx.role && ctx.nextRole !== 'outro') {
+        tomFill(ctx, bars - 1, ctx.chordAt(bars - 1), 0.8, 'acoustic');
       }
-      sing(ctx, second, hookB, { center: 4, lo: 0, hi: 11 });
       break;
+    }
     case 'break':
-      padChords(ctx, 'warm', { cut: () => [900, 1300], g: 0.5 });
-      for (let b = 0; b < bars; b++) clean(b, 0.4, 0);
-      if (ctx.turn === 0) sing(ctx, second, hook, { center: 5, lo: 1, hi: 12, stretch: 2, velocity: 0.8 });
+    case 'bridge':
+      // the drop to almost nothing: a swell, a few echoes, the room
+      swells(0.3);
+      for (let b = 0; b < bars; b += 2) shimmer(b, 0.25);
+      if (piano) {
+        play(ctx, 'piano', phrase(ctx, themeB, 0, bars, { center: 3, lo: -1, hi: 10, stretch: 2 }), 0.5, false);
+      } else sing(ctx, 'string:clean', themeB, { center: 3, lo: -1, hi: 10, stretch: 2, velocity: 0.7 });
       break;
     case 'rest':
       break;
     case 'outro':
     default:
-      padChords(ctx, 'strings', { cut: (slot) => runCut(ctx, slot, 2000, 900), g: 0.45, rel: 3 });
-      sustainedBass(ctx, 'round', 0.5, 0, runHalf(ctx), 2);
-      for (let b = 0; b < bars; b++) {
-        if (ctx.runBar(b) < ctx.runBars - 1) {
-          clean(b, 0.5 * (1 - ctx.runAt(b / bars)), ctx.runAt(b / bars) < 0.5 ? 1 : 0);
-        }
+      padChords(ctx, 'warm', { cut: (slot) => runCut(ctx, slot, 1400, 500), g: 0.4, rel: 3 });
+      swells(0.4 * (1 - ctx.runAt(0)));
+      sustainedBass(ctx, 'round', 0.4, 0, runHalf(ctx), 2);
+      for (let b = 0; b < bars; b++) if (ctx.runBar(b) < ctx.runBars - 1) shimmer(b, 0.35 * (1 - x(b)));
+      if (glock) {
+        play(
+          ctx,
+          'bell',
+          line().filter((n) => n.t < ctx.barAt(4)).map((n) => ({ ...n, n: n.n + 12 })),
+          0.3,
+          false,
+        );
       }
-      if (ctx.inRun === 0 && ctx.prevRole !== 'outro') crash(ctx, 0, 0.7);
+      if (ctx.inRun === 0 && ctx.prevRole !== 'outro') crash(ctx, 0, 0.6, true);
   }
   ringOut(ctx);
 }

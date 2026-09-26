@@ -3,12 +3,12 @@
 // synthwave bass and lead, flute and vinyl are new.
 
 import type { Ev, KickKind, LeadKind, PadKind, RiseKind } from '../types.ts';
-import type { Bus } from './bus.ts';
+import type { Bus, Stroke } from './bus.ts';
 import { freeverb, pan, saw, smooth, SVF, TAU, Wander } from './dsp.ts';
 import { Modes } from './modal.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
-const { exp, sin, tanh, min, max, sqrt, round, pow, PI } = Math;
+const { exp, sin, cos, tanh, min, max, sqrt, round, pow, abs, log2, PI } = Math;
 /** Release: -60 dB, r samples after note-off at sample `on`. */
 const fall = (j: number, on: number, r: number) => (j > on ? exp((-6.9 * (j - on)) / r) : 1);
 
@@ -19,7 +19,7 @@ const fall = (j: number, on: number, r: number) => (j > on ? exp((-6.9 * (j - on
 // soft-clipped together. A 4 kHz noise tick is the beater.
 // v2 kicks are rounder than v1's: the same weight, but less of the ringing knock (heard on its own, over a
 // bass that covers the thump, it turns tinny and bell-like) and a little more sub
-const KICK: Record<KickKind, readonly number[]> = {
+const KICK: Record<Exclude<KickKind, 'acoustic'>, readonly number[]> = {
   // sweep from Hz, sweep s, decay /s, drive, gain, beater, sub, knock, body, low-pass
   soft: [130, 0.008, 11, 1.3, 0.64, 0.35, 1, 0.4, 0.2, 3500],
   big: [150, 0.009, 8, 1.7, 0.7, 0.5, 0.8, 0.75, 0.6, 3500],
@@ -29,6 +29,7 @@ const KICK: Record<KickKind, readonly number[]> = {
 };
 
 export function kick(b: Bus, e: E<'kick'>): void {
+  if (e.k === 'acoustic') return acousticKick(b, e);
   const [f0, tau, dec, drive, g0, ck, sw, kn, pu, lpf] = KICK[e.k];
   const sr = b.sr;
   b.hit(
@@ -127,6 +128,7 @@ export function snare(b: Bus, e: E<'snare'>): void {
   if (e.k === 'clap') return clap(b, e);
   if (e.k === 'gated') return gated(b, e);
   if (e.k === 'rim') return rim(b, e);
+  if (e.k === 'acoustic') return acousticSnare(b, e);
   const size = { roll: 0.5, big: 1, huge: 1.7, dusty: 0.8 }[e.k];
   b.hit(
     `snare:${e.k}`,
@@ -156,6 +158,7 @@ export function snare(b: Bus, e: E<'snare'>): void {
 }
 
 export function tom(b: Bus, e: E<'tom'>): void {
+  if (e.k === 'acoustic') return acousticTom(b, e);
   const f = b.hz(e.n);
   b.hit(
     `tom:${e.n}`,
@@ -207,6 +210,259 @@ export function hat(b: Bus, e: E<'hat'>): void {
     },
     e.p ?? (sh ? ((e.t * 8) % 2 < 1 ? -0.35 : 0.35) : open ? -0.2 : 0.22),
     0.08,
+  );
+}
+
+// ------------------------------------------------------------------ the acoustic kit
+// A kit recorded in a room, fitted to recordings (out/research/proposals/sound-drums.md): the close and overhead
+// mics of Big Rusty Drums (Karoryfer, CC0) and VCSL (CC0), and the drums of four post-rock records. Each drum is
+// its head's modes, what strikes the head and what rattles with it; the room is the mix's reverb send.
+
+/** How hard a stroke is, from its brightness: 1 for a full stroke, about 0.3 for a ghost note. */
+const force = (s: Stroke) => s.bright ** 3;
+
+interface HeadSpec {
+  /** Ratio to the fundamental, dB re the fundamental at a full stroke. */
+  modes: readonly (readonly [number, number])[];
+  /** The fundamental's ring (T60, s); a mode at ratio r rings t60 · r^-fall. */
+  t60: number;
+  fall: number;
+  /** Share of each mode's amplitude the stroke radiates away at once, and how fast (T60, s). */
+  burst: number;
+  burstT60: number;
+  /** Pitch rise of a full stroke (fraction) and how fast it relaxes (time constant, s). */
+  glide: number;
+  glideT: number;
+  /** The upper modes' level re the fundamental goes as force^soft. */
+  soft: number;
+  /** How long the beater or stick stays on the head at a full stroke (s); a softer stroke stays longer. */
+  contact: number;
+}
+
+/** Spectrum of a half-sine push lasting `tc` seconds at `f` Hz, 1 at DC: the modes a long contact can't wake. */
+const push = (f: number, tc: number) => {
+  const x = 2 * f * tc;
+  return abs(x - 1) < 1e-6 ? PI / 4 : abs(cos(PI * x / 2) / (1 - x * x));
+};
+
+/**
+ * A drumhead: modes at the membrane's ratios (the shell's air pulls the lowest ones together), each ringing in
+ * two stages, a burst that radiates the stroke away in the first tens of ms and then the ring. All of them sag
+ * in pitch together as the tension the stroke added relaxes; that rise goes as the square of the stroke
+ * (tension modulation). The beater or stick pushes the head for a moment rather than at an instant: the sound
+ * swells in over that moment, and the modes too fast for it are barely woken. Each mode is a phasor turned
+ * every sample, its turn updated every 32 as the pitch sags.
+ */
+class Head {
+  private readonly x: Float64Array;
+  private readonly y: Float64Array;
+  private readonly c: Float64Array;
+  private readonly s: Float64Array;
+  private readonly ring: Float64Array;
+  private readonly fast: Float64Array;
+  private readonly dRing: Float64Array;
+  private readonly dFast: Float64Array;
+  private readonly r: number[] = [];
+  private readonly rise: number;
+  private readonly onset: number;
+  private j = 0;
+
+  constructor(
+    private readonly sr: number,
+    private readonly f0: number,
+    private readonly h: HeadSpec,
+    f: number,
+    t60 = h.t60,
+  ) {
+    const modes = h.modes.filter(([r]) => f0 * r * (1 + h.glide) < sr * 0.45);
+    const n = modes.length;
+    [this.x, this.y, this.c, this.s, this.ring, this.fast, this.dRing, this.dFast] = [0, 0, 0, 0, 0, 0, 0, 0].map(
+      () => new Float64Array(n),
+    );
+    this.rise = h.glide * f * f;
+    const tc = h.contact * f ** -0.2;
+    this.onset = tc * sr;
+    modes.forEach(([r, db], k) => {
+      const a = 10 ** (db / 20) * (k ? f ** h.soft * push(f0 * r, tc) / push(f0, tc) : 1);
+      this.r.push(r);
+      this.x[k] = 1;
+      this.ring[k] = a * (1 - h.burst);
+      this.fast[k] = a * h.burst;
+      this.dRing[k] = exp(-6.907755 / (t60 * r ** -h.fall * sr));
+      this.dFast[k] = exp(-6.907755 / (h.burstT60 * sr));
+    });
+  }
+
+  next(): number {
+    const { x, y, c, s, ring, fast, dRing, dFast } = this;
+    if ((this.j & 31) === 0) {
+      const g = 1 + this.rise * exp(-(this.j + 16) / (this.sr * this.h.glideT));
+      for (let k = 0; k < x.length; k++) {
+        const w = (TAU * this.f0 * this.r[k] * g) / this.sr;
+        c[k] = cos(w);
+        s[k] = sin(w);
+      }
+    }
+    this.j++;
+    let out = 0;
+    for (let k = 0; k < x.length; k++) {
+      const xk = x[k] * c[k] - y[k] * s[k];
+      y[k] = x[k] * s[k] + y[k] * c[k];
+      x[k] = xk;
+      ring[k] *= dRing[k];
+      fast[k] *= dFast[k];
+      out += y[k] * (ring[k] + fast[k]);
+    }
+    return this.j < this.onset ? out * sin((PI / 2) * (this.j / this.onset)) ** 2 : out;
+  }
+
+  /** The fundamental's amplitude, 1 at the stroke. */
+  get level(): number {
+    return this.ring[0] + this.fast[0];
+  }
+
+  /** Where the fundamental is in its swing, -1 to 1. */
+  get swing(): number {
+    return this.y[0];
+  }
+}
+
+// Big Rusty Drums' 24" kick: the (0,1) mode and its twin on the resonant head, then the air-loaded upper modes.
+const KICK_HEAD: HeadSpec = {
+  modes: [[1, 0], [1.16, -10], [1.86, -4], [2.27, -9], [2.96, -6]],
+  t60: 0.32,
+  fall: 0.8,
+  burst: 0.45,
+  burstT60: 0.07,
+  glide: 0.6,
+  glideT: 0.022,
+  soft: 0.7,
+  contact: 0.006,
+};
+
+/** A kick drum on the key's tonic or fifth: the head's boom sagging onto its pitch, and the felt beater's slap. */
+function acousticKick(b: Bus, e: E<'kick'>): void {
+  const sr = b.sr;
+  b.hit(
+    `kick:acoustic:${e.n}`,
+    e,
+    0.9,
+    (s) => {
+      const f = force(s);
+      const head = new Head(sr, b.hz(e.n) * s.tune, KICK_HEAD, f, KICK_HEAD.t60 * s.decay);
+      const slap = new SVF(sr, 1200 + 3000 * f, 0.7);
+      return (_j, u) => {
+        const beater = slap.run(b.noise.next()) * exp(-u / 0.003);
+        return (head.next() + 0.5 * beater) * 1.38;
+      };
+    },
+    0,
+    0.1,
+  );
+}
+
+// A 14" snare tuned low and fat (VCSL's modern snare, Big Rusty Drums' 14"): nearly the ideal membrane's ratios,
+// the bottom head's twin of the fundamental just above it.
+const SNARE_HEAD: HeadSpec = {
+  modes: [[1, 0], [1.17, -3], [1.6, 0], [2.13, -3], [2.51, -3], [2.71, -4], [3.2, -8], [3.76, -9], [4.2, -9]],
+  t60: 0.38,
+  fall: 0.5,
+  burst: 0.35,
+  burstT60: 0.05,
+  glide: 0.06,
+  glideT: 0.012,
+  soft: 0.2,
+  contact: 0.0015,
+};
+
+/**
+ * A snare: the head, its modes above these so dense they are heard as a band of noise, the stick's tick, and the
+ * wires rattling against the bottom head as it swings, until it swings too little to lift them. The buzz and the
+ * tick saturate on a hard stroke, so a ghost note is the same head with more wire and stick in it: thinner, not
+ * darker (as recorded, where it is also 20-25 dB under the backbeat).
+ */
+function acousticSnare(b: Bus, e: E<'snare'>): void {
+  const sr = b.sr;
+  b.hit(
+    'snare:acoustic',
+    e,
+    0.9,
+    (s) => {
+      const f = force(s);
+      const head = new Head(sr, 190 * s.tune, SNARE_HEAD, f, SNARE_HEAD.t60 * s.decay);
+      const dense = new SVF(sr, 1000 * s.tune, 0.5);
+      const darkDense = new SVF(sr, 2500, 0.6);
+      const hp = new SVF(sr, 1000, 0.5);
+      const lp = new SVF(sr, 6500 * s.bright, 0.6);
+      const stick = new SVF(sr, 2500 * s.bright ** 2, 0.7);
+      return (_j, u) => {
+        const body = head.next();
+        const level = head.level;
+        dense.run(b.noise.next());
+        hp.run(b.noise.next());
+        const drive = max(0, sqrt(f * level) - 0.05) / f;
+        // the wires are thrown off the bottom head and slap back, harder each swing: the buzz swells in after the
+        // crack and peaks 25-50 ms after it
+        const wires = lp.run(hp.hp) * drive * (0.6 + 0.4 * abs(head.swing)) * (1 - exp(-u / 0.015));
+        const tick = stick.run(b.noise.next()) * exp(-u / 0.001) * f ** -0.3;
+        const modes = darkDense.run(dense.bp) * level ** 0.7 * (1 - exp(-u / 0.001));
+        return (body + 4.5 * modes + 0.9 * wires + 0.12 * tick) * 0.76;
+      };
+    },
+    0,
+    0.5,
+  );
+}
+
+// Toms (Big Rusty Drums' 14", 15" and 18", VCSL's two): the air-loaded ratios measured on them.
+const TOM_HEAD: HeadSpec = {
+  modes: [[1, 0], [1.18, -14], [1.6, -18], [1.85, -8], [2.15, -12], [2.55, -15], [3.0, -18], [3.45, -22], [4.3, -16]],
+  t60: 1.3,
+  fall: 0.9,
+  burst: 0.35,
+  burstT60: 0.12,
+  glide: 0.12,
+  glideT: 0.04,
+  soft: 0.85,
+  contact: 0.002,
+};
+
+/**
+ * A tom rings on its pitch, sagging into it after a hard stroke; lower toms ring longer. Above its modes, ones
+ * too dense to tell apart are a band of noise, and the snare's wires buzz faintly with it, as on any kit. High
+ * toms sit left, the floor tom right (the drummer's view).
+ */
+function acousticTom(b: Bus, e: E<'tom'>): void {
+  const sr = b.sr;
+  const f0 = b.hz(e.n);
+  const t60 = min(1.8, max(0.8, 1.3 * (100 / f0) ** 0.3));
+  b.hit(
+    `tom:acoustic:${e.n}`,
+    e,
+    1.1 * t60 + 0.1,
+    (s) => {
+      const f = force(s);
+      const head = new Head(sr, f0 * s.tune, TOM_HEAD, f, t60 * s.decay);
+      const stick = new SVF(sr, 3000 * s.bright ** 2, 0.7);
+      const dense = new SVF(sr, 7 * f0 * s.tune, 0.6);
+      const dark = new SVF(sr, 2000 * s.bright, 0.6);
+      const hp = new SVF(sr, 2000, 0.7);
+      const lp = new SVF(sr, 6000, 0.7);
+      return (j, u) => {
+        const body = head.next();
+        const level = head.level;
+        // the higher of these modes die sooner: the band darkens as the head rings down
+        if ((j & 63) === 0) dark.set(2000 * s.bright * (0.25 + 0.75 * level));
+        dense.run(b.noise.next());
+        const modes = dark.run(dense.bp) * level ** 0.9 * f ** 0.8 * (1 - exp(-u / 0.0015));
+        const tick = stick.run(b.noise.next()) * exp(-u / 0.0015);
+        hp.run(b.noise.next());
+        const buzz = lp.run(hp.hp) * level * level;
+        return (body + 1.5 * modes + 0.4 * tick + 0.004 * buzz) * 0.43;
+      };
+    },
+    max(-0.4, min(0.5, 1.6 * log2(95 / f0))),
+    0.35,
   );
 }
 

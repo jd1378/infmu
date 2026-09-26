@@ -30,6 +30,7 @@ export type Voice =
 const RANGE: Record<Voice, readonly [lo: number, hi: number]> = {
   'string:guitar': [52, 86],
   'string:electric': [52, 88],
+  'string:clean': [52, 88],
   'string:overdrive': [52, 88],
   'string:harp': [48, 96],
   'mallet:vibes': [53, 89],

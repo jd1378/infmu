@@ -36,9 +36,11 @@ export class Bus {
   readonly MR: Float32Array;
   readonly REV: Float32Array;
   readonly DLY: Float32Array;
-  /** Overdriven guitars, summed before the amp so chords distort together. */
+  /** Overdriven guitars, summed before the amp so chords distort together; AMP2, a second amp on the right. */
   readonly AMP: Float32Array;
+  readonly AMP2: Float32Array;
   ampUsed = false;
+  amp2Used = false;
   /** Gain curve of the kick's pump, 1 = untouched. */
   duck: Float32Array;
   readonly noise: Noise;
@@ -53,7 +55,7 @@ export class Bus {
     this.sr = sr;
     this.a4 = a4;
     this.n = Math.round(seconds * sr);
-    [this.L, this.R, this.ML, this.MR, this.REV, this.DLY, this.AMP] = [0, 0, 0, 0, 0, 0, 0].map(() =>
+    [this.L, this.R, this.ML, this.MR, this.REV, this.DLY, this.AMP, this.AMP2] = [0, 0, 0, 0, 0, 0, 0, 0].map(() =>
       new Float32Array(this.n)
     );
     this.duck = new Float32Array(this.n).fill(1);

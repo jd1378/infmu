@@ -3,7 +3,7 @@
 
 import { mod, voiceLead } from '../theory.ts';
 import type { Rng } from '../rng.ts';
-import type { AcidNote, BassKind, HatKind, KickKind, PadKind, SnareKind, StringKind } from '../types.ts';
+import type { AcidNote, BassKind, HatKind, KickKind, Note, PadKind, SnareKind, StringKind, TomKind } from '../types.ts';
 import { type ChordSlot, type Ctx, PAD_HI, PAD_LO, sectionChords } from './context.ts';
 
 const VEL: Record<string, number> = { x: 1, o: 0.72, '-': 0.42 };
@@ -27,6 +27,8 @@ export interface DrumKit {
   sc?: number;
   /** Level of hats and shakers relative to the rest of the kit. */
   hats?: number;
+  /** An acoustic kit's toms and cymbals (the kick and snare are chosen above). */
+  acoustic?: boolean;
   /** The backbeat (snare, clap, rim) this fraction of a 16th behind the grid: a lazy, lo-fi feel. */
   lag?: number;
 }
@@ -135,9 +137,11 @@ export function runRiser(ctx: Ctx, k: 'build' | 'sweep', sweep: boolean): void {
 }
 
 /** Four toms falling through the chord on the last beat of a bar. */
-export function tomFill(ctx: Ctx, bar: number, slot: ChordSlot, v = 0.8): void {
+export function tomFill(ctx: Ctx, bar: number, slot: ChordSlot, v = 0.8, k?: TomKind): void {
   const ns = slot.voicing.slice().sort((a, b) => b - a).slice(0, 4).map((n) => n - 12);
-  ns.forEach((n, i) => ctx.push({ i: 'tom', t: ctx.barAt(bar, ctx.spb - 4 + i), v: v * (0.85 + 0.05 * i), n }));
+  ns.forEach((n, i) =>
+    ctx.push({ i: 'tom', t: ctx.barAt(bar, ctx.spb - 4 + i), v: v * (0.85 + 0.05 * i), n, ...(k ? { k } : {}) })
+  );
 }
 
 // ------------------------------------------------------------------ bass
@@ -367,6 +371,50 @@ export function guitarVoicing(slot: ChordSlot, low = 40): number[] {
   return out;
 }
 
+/**
+ * A post-rock chord shape: the chord's root and fifth low, its third above them, and on top the key's tonic and
+ * fifth, left ringing like open strings whatever the chord. The drone turns every chord into a shimmering add9 or
+ * sus, and holds the piece together while the bass moves.
+ */
+export function droneVoicing(ctx: Ctx, slot: ChordSlot, low = 45): number[] {
+  const root = low + mod(slot.pcs[0] - low, 12);
+  const above = (from: number, p: number) => from + 1 + mod(p - (from + 1), 12);
+  const fifth = above(root, slot.pcs[2] ?? slot.pcs[1]);
+  const third = above(fifth, slot.pcs[1]);
+  const tonic = 59 + mod(ctx.key.tonic - 59, 12);
+  const drones = [tonic, above(tonic, (ctx.key.tonic + 7) % 12)];
+  return [...new Set([root, fifth, third, ...drones])].sort((a, b) => a - b);
+}
+
+/**
+ * Picking through given notes (lowest first) for one bar: `idx` are indices into them (-1 a rest), one every
+ * `every` 16ths, accented on the beats, placed at `p`.
+ */
+export function pickNotes(
+  ctx: Ctx,
+  bar: number,
+  k: StringKind,
+  ns: readonly number[],
+  idx: readonly number[],
+  every: 1 | 2 | 3 | 4 | 6,
+  v: number,
+  p?: number,
+): void {
+  for (let s = 0, j = 0; s < ctx.spb; s += every, j++) {
+    const i = idx[j % idx.length];
+    if (i < 0) continue;
+    const n = ns[Math.min(ns.length - 1, i)];
+    ctx.push({
+      i: 'string',
+      t: ctx.barAt(bar, s),
+      n,
+      v: v * (ctx.onBeat(s) ? 1 : 0.8),
+      k,
+      ...(p === undefined ? {} : { p }),
+    });
+  }
+}
+
 /** A strum: the strings a few milliseconds apart, down (low to high) or up. */
 export function strum(
   ctx: Ctx,
@@ -379,6 +427,36 @@ export function strum(
 ): void {
   const ns = up ? notes.slice().reverse() : notes;
   ns.forEach((n, i) => ctx.push({ i: 'string', t: t + i * 0.011, n, v: v * (up ? 0.8 : 1) * (1 - 0.04 * i), k, d }));
+}
+
+/**
+ * Tremolo picking: each note of a line picked again and again as fast as the hand goes (16ths, or 32nds with
+ * `fast`), down and up strokes alternating (the up a little lighter), so a held note becomes a shimmering one.
+ * The line's own dynamics stay; `lead` marks the tune.
+ */
+export function tremolo(
+  ctx: Ctx,
+  line: readonly Note[],
+  k: StringKind,
+  v: number,
+  o: { fast?: boolean; lead?: boolean; p?: number } = {},
+): void {
+  const step = o.fast ? ctx.s16 / 2 : ctx.s16;
+  for (const n of line) {
+    const strokes = Math.max(1, Math.round(n.d / step));
+    for (let j = 0; j < strokes; j++) {
+      ctx.push({
+        i: 'string',
+        t: n.t + j * step,
+        n: n.n,
+        v: v * n.v * (j % 2 ? 0.8 : 1),
+        k,
+        d: step * 1.1,
+        lead: o.lead ?? false,
+        ...(o.p === undefined ? {} : { p: o.p }),
+      });
+    }
+  }
 }
 
 /**
@@ -400,7 +478,7 @@ export function pick(
   bar: number,
   k: StringKind,
   idx: readonly number[],
-  every: 1 | 2,
+  every: 1 | 2 | 4,
   v: number,
   low = 40,
 ): void {
@@ -475,15 +553,18 @@ export interface PercBar {
   bongo?: string;
   cowbell?: string;
   ride?: string;
+  /** Crashes ridden like a ride: post-rock's wash of cymbals at a climax. */
+  crash?: string;
   snap?: string;
 }
 
 // hand drums tuned to the key: the low conga on the fifth, the high one on the tonic, the bongo a fifth above
 const DRUM_TUNING: Partial<Record<keyof PercBar, number>> = { conga: 19, congaHi: 24, bongo: 31 };
 
-export function percBar(ctx: Ctx, bar: number, p: PercBar, gain = 1): void {
+/** A bar of hand percussion and cymbals; `acoustic` plays the crash and ride lanes on the acoustic kit's cymbals. */
+export function percBar(ctx: Ctx, bar: number, p: PercBar, gain = 1, acoustic = false): void {
   const r = ctx.rng;
-  for (const k of ['conga', 'congaHi', 'bongo', 'cowbell', 'ride', 'snap'] as const) {
+  for (const k of ['conga', 'congaHi', 'bongo', 'cowbell', 'ride', 'crash', 'snap'] as const) {
     const pat = p[k];
     const tune = DRUM_TUNING[k];
     const n = tune === undefined ? undefined : ctx.tonicLow + tune;
@@ -495,7 +576,7 @@ export function percBar(ctx: Ctx, bar: number, p: PercBar, gain = 1): void {
             i: 'perc',
             t: Math.max(0, ctx.barAt(bar, s) + r.jitter(0.004)),
             v: v * gain * (0.85 + 0.15 * r.next()),
-            k,
+            k: acoustic && k === 'crash' ? 'acousticCrash' : acoustic && k === 'ride' ? 'acousticRide' : k,
             n,
           }),
         ctx.spb,
@@ -504,7 +585,8 @@ export function percBar(ctx: Ctx, bar: number, p: PercBar, gain = 1): void {
   }
 }
 
-export const crash = (ctx: Ctx, bar = 0, v = 0.8) => ctx.push({ i: 'perc', t: ctx.barAt(bar), v, k: 'crash' });
+export const crash = (ctx: Ctx, bar = 0, v = 0.8, acoustic = false) =>
+  ctx.push({ i: 'perc', t: ctx.barAt(bar), v, k: acoustic ? 'acousticCrash' : 'crash' });
 
 /**
  * An acid pattern for the movement: sixteen steps of notes drawn from the key's darker degrees (root, octave,

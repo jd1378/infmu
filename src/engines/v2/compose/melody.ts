@@ -178,15 +178,16 @@ export const PROFILES: Record<StyleId, Profile> = {
     tensions: 1,
     shapes: [['arch', 3], ['leap', 2], ['fall', 1]],
   },
+  // post-rock themes are few, long notes, mostly by step: a line a guitar can tremolo-pick over a wall
   ember: {
-    head: [...SPARSE, ...LYRICAL],
+    head: [...SPARSE, LYRICAL[0], LYRICAL[1], LYRICAL[6]],
     riff: false,
-    climb: [4, 7],
-    leaps: [4, 5, 7],
-    repeat: 0.06,
-    appoggiaturas: 1,
+    climb: [3, 5],
+    leaps: [3, 4],
+    repeat: 0.12,
+    appoggiaturas: 0,
     tensions: 1,
-    shapes: [['leap', 3], ['arch', 3]],
+    shapes: [['arch', 3], ['fall', 2], ['leap', 1]],
   },
 };
 

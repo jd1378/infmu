@@ -1,5 +1,5 @@
 import type { ModeName } from './theory.ts';
-import type { Meter, Role, StyleId, Transition } from './types.ts';
+import type { AmpTone, Meter, Role, StyleId, Transition } from './types.ts';
 
 type Weighted<T> = readonly (readonly [T, number])[];
 type Range = readonly [number, number];
@@ -53,9 +53,27 @@ export interface StyleDef {
    * `early` is their level against the reverb send; `hiss` the noise floor in dBFS (null: a clean digital
    * production); `warmth` how hard the console and tape are driven (0: clean); `width` the side-to-mid ratio the
    * bed is opened up to (stereo-recorded instruments in a room sit around 0.5 to 0.7, a piano recorded by a spaced
-   * pair wider still).
+   * pair wider still); `amp` how an overdriven guitar's amp drives; `echo`, `hall` and `shimmer` the effects a guitar
+   * rig brings (see Mix).
    */
-  record: { size: number; early: number; hiss: number | null; warmth: number; width: number };
+  record: {
+    size: number;
+    early: number;
+    hiss: number | null;
+    warmth: number;
+    width: number;
+    amp: AmpTone;
+    echo?: 'tape';
+    hall?: boolean;
+    shimmer?: number;
+  };
+  /**
+   * How much longer than the listener's chosen length its pieces run: post-rock needs the time for its long
+   * crescendos (1 for the rest).
+   */
+  stretch?: number;
+  /** A piece that runs short grows its parts instead of going round again (post-rock's long waves). */
+  grow?: boolean;
 }
 
 export const ROLE_ENERGY: Record<Role, number> = {
@@ -104,7 +122,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0.4],
     tempo: { rubato: 0.04, push: 0, rit: 0.3 },
-    record: { size: 1.3, early: 0.5, hiss: -72, warmth: 0, width: 0.6 },
+    record: { size: 1.3, early: 0.5, hiss: -72, warmth: 0, width: 0.6, amp: 'crunch' },
   },
   haze: {
     id: 'haze',
@@ -137,7 +155,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0.5, 1],
     wow: [0.6, 1],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 0.6, early: 0.7, hiss: -60, warmth: 0.5, width: 0.6 },
+    record: { size: 0.6, early: 0.7, hiss: -60, warmth: 0.5, width: 0.6, amp: 'crunch' },
   },
   pulse: {
     id: 'pulse',
@@ -170,7 +188,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0.2],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 0.9, early: 0.3, hiss: null, warmth: 0.2, width: 0.6 },
+    record: { size: 0.9, early: 0.3, hiss: null, warmth: 0.2, width: 0.6, amp: 'crunch' },
   },
   rise: {
     id: 'rise',
@@ -203,7 +221,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 1.0, early: 0.25, hiss: null, warmth: 0, width: 0.6 },
+    record: { size: 1.0, early: 0.25, hiss: null, warmth: 0, width: 0.6, amp: 'crunch' },
   },
   cathedral: {
     id: 'cathedral',
@@ -236,7 +254,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0.05, push: 0.015, rit: 0.4 },
-    record: { size: 1.6, early: 0.6, hiss: -70, warmth: 0, width: 0.8 },
+    record: { size: 1.6, early: 0.6, hiss: -70, warmth: 0, width: 0.8, amp: 'crunch' },
   },
   acid: {
     id: 'acid',
@@ -269,7 +287,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 0.8, early: 0.25, hiss: null, warmth: 0.2, width: 0.6 },
+    record: { size: 0.8, early: 0.25, hiss: null, warmth: 0.2, width: 0.6, amp: 'crunch' },
   },
   garden: {
     id: 'garden',
@@ -302,7 +320,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0.2],
     tempo: { rubato: 0, push: 0.012, rit: 0.25 },
-    record: { size: 0.8, early: 0.6, hiss: -68, warmth: 0.3, width: 0.6 },
+    record: { size: 0.8, early: 0.6, hiss: -68, warmth: 0.3, width: 0.6, amp: 'crunch' },
   },
   nocturne: {
     id: 'nocturne',
@@ -335,7 +353,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0.16, push: 0.01, rit: 0.4 },
-    record: { size: 0.9, early: 0.6, hiss: -70, warmth: 0, width: 0.85 },
+    record: { size: 0.9, early: 0.6, hiss: -70, warmth: 0, width: 0.85, amp: 'crunch' },
   },
   ember: {
     id: 'ember',
@@ -345,30 +363,34 @@ export const STYLES: Record<StyleId, StyleDef> = {
     meters: [['4/4', 6], ['6/8', 2], ['3/4', 1]],
     swing: [0, 0],
     modes: [['aeolian', 3], ['ionian', 2], ['lydian', 2], ['dorian', 1]],
+    // waves, as the references build them: a quiet theme, a long crescendo, a climax held for a long time, a sudden
+    // drop to almost nothing, and a second, bigger wave
     forms: [
-      'intro:8 verse:8 verse:8 build:8 chorus:8 chorus:8 break:8 break:8? build:8 build:8? drop:8 drop:8 outro:8 outro:8?',
-      'intro:8 verse:8 build:8 chorus:8 bridge:8 break:8 build:8 drop:8 drop:8 drop:8? outro:8',
-      'intro:8 verse:8 verse:8 build:8 build:8 chorus:8 drop:8 drop:8 outro:8',
-      'intro:8 verse:8 chorus:8 break:8 verse:8 build:8 drop:12 outro:6',
+      'intro:8 verse:16 build:16 drop:16 break:8 verse:8? build:16 drop:16 drop:8? outro:8',
+      'intro:8 verse:16 verse:8? build:16 build:16 drop:16 drop:16 outro:8',
+      'intro:16 verse:16 build:8 chorus:16 break:16 build:16 drop:16 drop:8? outro:8',
+      'intro:8 build:16 build:16 drop:16 break:8 build:8 drop:16 outro:4',
     ],
-    dynamics: [-10, 16],
-    balance: [-3, -4],
-    chordSize: [[3, 3], [5, 1]],
-    sus2: 0.25,
-    barsPerChord: 1,
+    dynamics: [-10, 18],
+    balance: [-3, -1],
+    chordSize: [[3, 2], [5, 2]],
+    sus2: 0.35,
+    barsPerChord: 2,
     lift: 0,
     away: 0.2,
     next: [['ember', 1], ['cathedral', 3], ['drift', 2], ['pulse', 2], ['rise', 1]],
     transitions: [['pause', 3], ['fade', 2], ['swell', 2]],
-    room: [0.86, 0.92],
-    reverb: [1.5, 1.8],
+    room: [0.9, 0.95],
+    reverb: [1.8, 2.2],
     delayBeats: [0.75],
-    delayFeedback: [0.45, 0.58],
-    delayWet: [0.45, 0.65],
+    delayFeedback: [0.55, 0.65],
+    delayWet: [0.5, 0.7],
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0.025, rit: 0.3 },
-    record: { size: 1.1, early: 0.6, hiss: -66, warmth: 0.4, width: 0.6 },
+    record: { size: 1.1, early: 0.6, hiss: -72, warmth: 0.4, width: 0.65, amp: 'fuzz', echo: 'tape', hall: true },
+    stretch: 1.6,
+    grow: true,
   },
 };
 

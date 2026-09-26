@@ -250,7 +250,7 @@ function planForm(
     const [role, bars] = s.replace('?', '').split(':');
     return { role: role as Role, bars: Number(bars), optional: s.endsWith('?') };
   });
-  const [lo, hi] = LENGTHS[length];
+  const [lo, hi] = LENGTHS[length].map((x) => x * (style.stretch ?? 1));
   const target = rng.range(lo, hi);
   const seconds = () => steps.reduce((s, x) => s + x.bars * bar, 0);
   for (let i = steps.length - 1; i >= 0 && seconds() > target + 8; i--) if (steps[i].optional) steps.splice(i, 1);
@@ -273,6 +273,20 @@ function planForm(
   }
   // and as a last resort, eight-bar parts become four
   for (let k = steps.length - 2; k > 0 && seconds() > target + 15; k--) if (steps[k].bars === 8) steps[k].bars = 4;
+
+  // too short, in a style that grows (post-rock): its parts get longer instead, the builds and the climaxes first,
+  // eight bars at a time up to 32; the waves stay as they are, only slower to break
+  if (style.grow) {
+    const order: Role[] = ['build', 'drop', 'chorus', 'verse', 'break', 'intro'];
+    for (let pass = 0; pass < 8 && seconds() < target - 20; pass++) {
+      for (const role of order) {
+        for (const s of steps) {
+          if (s.role !== role || s.bars >= 32 || seconds() + 8 * bar > target + 15) continue;
+          s.bars += 8;
+        }
+      }
+    }
+  }
 
   // too short (a long piece): the song goes round again before its outro, a different way each time, with only
   // the parts the style has
@@ -357,6 +371,13 @@ function arc(steps: readonly { role: Role; bars: number }[], burn = 1): number[]
     const calm = ['intro', 'outro', 'rest', 'break', 'bridge'].includes(s.role);
     return ROLE_ENERGY[s.role] + (calm ? 0.1 : 0.35) * pos;
   });
+  // a run of builds is one crescendo: from under a build's usual energy to over it
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i].role !== 'build' || steps[i - 1]?.role === 'build') continue;
+    let j = i;
+    while (steps[j + 1]?.role === 'build') j++;
+    for (let k = i; k <= j; k++) raw[k] += j > i ? -0.12 + (0.3 * (k - i)) / (j - i) : 0;
+  }
   const top = Math.max(...raw);
   return raw.map((e) => e / top);
 }

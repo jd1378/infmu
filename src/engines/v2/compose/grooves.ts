@@ -69,11 +69,17 @@ export function grooveBass(g: Groove, full: boolean, runBar: number, fill: boole
 /** One bar of a groove: the kit, hand percussion at `perc` relative level, and pitched drums. */
 export function grooveBar(ctx: Ctx, bar: number, p: GrooveBar, kit: DrumKit, gain = 1, perc = 0.6): void {
   drums(ctx, bar, p, kit, gain);
-  percBar(ctx, bar, p, gain * perc);
+  percBar(ctx, bar, p, gain * perc, kit.acoustic);
   const t = (s: number) => Math.max(0, ctx.barAt(bar, s) + ctx.rng.jitter(0.005));
   const lo = ctx.tonicLow + 12;
   for (const [pat, n] of [[p.lo, lo], [p.mid, lo + 7], [p.hi, lo + 12]] as const) {
-    if (pat) grid(pat, (s, v) => ctx.push({ i: 'tom', t: t(s), v: v * gain, n }), ctx.spb);
+    if (pat) {
+      grid(
+        pat,
+        (s, v) => ctx.push({ i: 'tom', t: t(s), v: v * gain, n, ...(kit.acoustic ? { k: 'acoustic' } : {}) }),
+        ctx.spb,
+      );
+    }
   }
 }
 
@@ -770,119 +776,49 @@ export const GARDEN: Weighted<Groove> = [
   }, 1],
 ];
 
-// ------------------------------------------------------------------ ember: post-rock, 96-124 bpm
-// A band, not a machine: the bass doubles the kick, floor toms (`lo`) carry the quiet parts, the ride and the
-// crash carry the loud ones. Verses keep the style's rim kit, climaxes its full kit.
+// ------------------------------------------------------------------ ember: post-rock
+// Drawn from the references (Explosions in the Sky, Mono, April Rain): the quiet parts have no drums at all (the
+// arranger leaves them out); a build rides the floor tom and the kick, and crescendoes into a roll; a climax is
+// heavy and half-time under a wash of crashes ridden like a ride cymbal. The bass is the arranger's (sustained).
 
 export const EMBER: Weighted<Groove> = [
   [{
-    name: 'motorik',
-    light: { kick: 'x.x...x.x.x...x.', snare: '....x.......x...', hat: 'x.o.x.o.x.o.x.o.' },
-    full: { kick: 'x.x...x.x.x...x.', snare: '....x.......x...', ride: 'x.o.x.o.x.o.x.o.' },
-    fill: {},
-    layer: { shaker: '-o-o-o-o-o-o-o-o' },
-    bassLight: [
-      [0, 2, 0, 1],
-      [2, 2, 0, 0.8],
-      [4, 2, 0, 0.85],
-      [6, 2, 0, 0.8],
-      [8, 2, 0, 0.9],
-      [10, 2, 0, 0.8],
-      [12, 2, 0, 0.85],
-      [14, 2, 0, 0.8],
-    ],
-    bassFull: [
-      [0, 2, 0, 1],
-      [2, 2, 0, 0.8],
-      [4, 2, 0, 0.85],
-      [6, 2, 0, 0.8],
-      [8, 2, 0, 0.9],
-      [10, 2, 0, 0.8],
-      [12, 2, 7, 0.85],
-      [14, 2, 12, 0.8],
-    ],
-    // motorik never fills: the phrase end is marked by the crash on the next downbeat, the bass keeps going
-    bassFill: [
-      [0, 2, 0, 1],
-      [2, 2, 0, 0.8],
-      [4, 2, 0, 0.85],
-      [6, 2, 0, 0.8],
-      [8, 2, 0, 0.9],
-      [10, 2, 0, 0.8],
-      [12, 2, 7, 0.85],
-      [14, 2, 12, 0.8],
-    ],
+    name: 'crash wash',
+    light: { lo: 'x.x.x.x.x.x.x.x.', kick: 'x.......x.......' },
+    full: { kick: 'x.....x.x.......', snare: '........x.......', crash: 'x.o.x.o.x.o.x.o.' },
+    fill: { snare: '........x.x.xxxx', crash: 'x.o.x.o.........' },
+    layer: { lo: 'x...x...x...x...' },
+    bassLight: [[0, 16, 0, 0.9]],
+    bassFull: [[0, 16, 0, 1]],
   }, 3],
   [{
-    name: 'crescendo eighths',
-    light: { kick: 'x.......x.......', snare: '....o.......o...', lo: 'o.-.o.-.o.-.o.-.' },
-    full: { kick: 'x.......x.......', snare: '....x.......x...', ride: 'x.o.x.o.x.o.x.o.' },
-    fill: {
-      kick: 'x...x...........',
-      snare: '....x...........',
-      hi: '........xx......',
-      mid: '..........xx....',
-      lo: '............xxxx',
+    name: 'driving eighths',
+    light: { lo: 'x...x...x...x...', ride: 'o.o.o.o.o.o.o.o.' },
+    full: {
+      kick: 'x...x...x...x...',
+      snare: '....x.......x...',
+      ride: 'x.x.x.x.x.x.x.x.',
+      crash: 'x...............',
     },
-    layer: { lo: '-.o.-.o.-.o.-.o.' },
-    bassLight: [[0, 8, 0, 1], [8, 8, 0, 0.85]],
-    bassFull: [
-      [0, 2, 0, 1],
-      [2, 2, 0, 0.75],
-      [4, 2, 0, 0.85],
-      [6, 2, 0, 0.75],
-      [8, 2, 0, 0.95],
-      [10, 2, 0, 0.75],
-      [12, 2, 0, 0.85],
-      [14, 2, 0, 0.75],
-    ],
+    fill: { snare: '....x.......x.xx', mid: '..........xx....', lo: '............xx..' },
+    layer: { crash: 'x.......x.......' },
+    bassLight: [[0, 16, 0, 0.9]],
+    bassFull: [[0, 16, 0, 1]],
   }, 2],
   [{
-    name: 'half-time swell',
-    light: { kick: 'x...............', snare: '........o.......', ride: 'o...o...o...o...' },
-    full: { kick: 'x.........x.....', snare: '........x.......', ride: 'x.o.x.o.x.o.x.o.' },
-    fill: { hi: '............xx..', mid: '..............x.', lo: '...............x' },
-    layer: { lo: '....o.......o...' },
-    bassLight: [[0, 16, 0, 1]],
-    bassFull: [[0, 8, 0, 1], [8, 2, 7, 0.7], [10, 6, 0, 0.9]],
+    name: 'tom march',
+    light: { lo: 'x..x..x.x..x..x.', mid: '....x.......x...' },
+    full: {
+      kick: 'x..x..x.x..x..x.',
+      snare: '....x.......x...',
+      crash: 'x.......x.......',
+      lo: 'x..x..x.x..x..x.',
+    },
+    fill: { lo: 'x..x..x.x.x.xxxx', snare: '....x.......x...' },
+    layer: { ride: '..x...x...x...x.' },
+    bassLight: [[0, 16, 0, 0.9]],
+    bassFull: [[0, 16, 0, 1]],
   }, 2],
-  [{
-    name: 'tribal toms',
-    light: { kick: 'x.......x.......', snare: '............o...', lo: 'o.--o.--o.--o.--', mid: '......-.......-.' },
-    full: { kick: 'x.......x.......', snare: '....x.......x...', lo: 'x.o-x.o-x.o-x.o-', mid: '......o.......o.' },
-    fill: { hi: '........x.x.....', mid: '.........x.x....', lo: 'x.o-x.o-....xxxx' },
-    layer: { ride: 'x...x...x...x...' },
-    bassLight: [[0, 8, 0, 1], [8, 8, 0, 0.85]],
-    bassFull: [[0, 4, 0, 1], [4, 4, 0, 0.8], [8, 4, 0, 0.9], [12, 4, 12, 0.8]],
-  }, 1],
-  [{
-    name: 'dotted-eighth drift',
-    light: { kick: 'x.....x...x.....', snare: '....o.......o...', hat: 'o..o..o..o..o...' },
-    full: { kick: 'x.....x...x.....', snare: '....x.......x...', ride: 'x..o..x..o..x..o' },
-    fill: { kick: 'x.....x.........', snare: '....x.......x..o' },
-    layer: { shaker: '-o-o-o-o-o-o-o-o' },
-    bassLight: [[0, 6, 0, 1], [6, 4, 0, 0.85], [10, 6, 0, 0.9]],
-    bassFull: [[0, 3, 0, 1], [3, 3, 0, 0.65], [6, 4, 12, 0.85], [10, 3, 0, 0.9], [13, 3, 7, 0.7]],
-  }, 1],
-  [{
-    name: 'martial',
-    kit: { snare: 'big' },
-    light: { kick: 'x.......x.......', snare: '-.-.o.-.-.-.o.-.' },
-    full: { kick: 'x.......x.......', snare: 'o-o-x-o-o-o-x-o-', ride: 'x...x...x...x...' },
-    fill: { snare: 'o-o-x-o-o-o-xxxx' },
-    layer: { lo: 'o...o...o...o...' },
-    bassLight: [[0, 8, 0, 1], [8, 8, 0, 0.85]],
-    bassFull: [
-      [0, 2, 0, 1],
-      [2, 2, 0, 0.75],
-      [4, 2, 0, 0.85],
-      [6, 2, 0, 0.75],
-      [8, 2, 0, 0.9],
-      [10, 2, 0, 0.75],
-      [12, 2, 0, 0.85],
-      [14, 2, 12, 0.75],
-    ],
-  }, 1],
 ];
 
 // ------------------------------------------------------------------ cathedral: cinematic, 68-82 bpm
@@ -1135,33 +1071,33 @@ export const EMBER_TIMES: Banks = {
   '4/4': EMBER,
   '3/4': [
     [{
-      name: 'post-rock waltz',
-      light: { kick: 'x...........', snare: '....o...o...', hat: 'x.o.x.o.x.o.' },
-      full: { kick: 'x.......x...', snare: '....x...x...', ride: 'x.o.x.o.x.o.' },
-      fill: { snare: '....x...xoxx' },
-      layer: { shaker: '-.-.-.-.-.-.' },
-      bassLight: [[0, 4, 0, 1], [4, 8, 7, 0.8]],
-      bassFull: [[0, 4, 0, 1], [4, 4, 7, 0.85], [8, 4, 12, 0.8]],
+      name: 'waltz wash',
+      light: { lo: 'x.x.x.x.x.x.', kick: 'x...........' },
+      full: { kick: 'x.......x...', snare: '........x...', crash: 'x.o.x.o.x.o.' },
+      fill: { snare: '....x...xxxx', crash: 'x.o.x.......' },
+      layer: { lo: 'x...x...x...' },
+      bassLight: [[0, 12, 0, 0.9]],
+      bassFull: [[0, 12, 0, 1]],
     }, 1],
   ],
   '6/8': [
     [{
-      name: 'rolling six',
-      light: { kick: 'x.........o.', snare: '......o.....', hat: 'x.o.o.x.o.o.' },
-      full: { kick: 'x...o.....x.', snare: '......x.....', ride: 'x.o.o.x.o.o.' },
-      fill: { snare: '......x.xoxx' },
-      layer: { shaker: '-.-.-.-.-.-.' },
-      bassLight: [[0, 6, 0, 1], [6, 6, 0, 0.85]],
-      bassFull: [[0, 4, 0, 1], [4, 2, 0, 0.7], [6, 4, 7, 0.9], [10, 2, 0, 0.75]],
+      name: 'six wash',
+      light: { lo: 'x.x.x.x.x.x.', kick: 'x.....x.....' },
+      full: { kick: 'x.....x.x...', snare: '......x.....', crash: 'x.o.o.x.o.o.' },
+      fill: { snare: '......x.x.xx', crash: 'x.o.o.......' },
+      layer: { lo: 'x.....x.....' },
+      bassLight: [[0, 12, 0, 0.9]],
+      bassFull: [[0, 12, 0, 1]],
     }, 3],
     [{
-      name: 'drifting six',
-      light: { kick: 'x...........', hat: 'o.-.-.o.-.-.' },
-      full: { kick: 'x.....x.....', snare: '......x.....', ride: 'x.-.-.x.-.-.' },
-      fill: { snare: '......o.x.xx' },
-      layer: { shaker: '-.o.o.-.o.o.' },
-      bassLight: [[0, 12, 0, 1]],
-      bassFull: [[0, 6, 0, 1], [6, 6, 7, 0.85]],
+      name: 'rolling six',
+      light: { kick: 'x.........o.', lo: 'x.o.o.x.o.o.' },
+      full: { kick: 'x...o.....x.', snare: '......x.....', ride: 'x.o.o.x.o.o.', crash: 'x...........' },
+      fill: { snare: '......x.xoxx' },
+      layer: { crash: 'x.....x.....' },
+      bassLight: [[0, 12, 0, 0.9]],
+      bassFull: [[0, 12, 0, 1]],
     }, 2],
   ],
 };

@@ -135,19 +135,343 @@ export function freeverb(
   }
 }
 
-/** A biquad in transposed direct form II. */
-class Biquad {
-  private z1 = 0;
-  private z2 = 0;
-  private readonly c: readonly number[];
-  constructor(b0: number, b1: number, b2: number, a1: number, a2: number) {
-    this.c = [b0, b1, b2, a1, a2];
+/** The hall's delay lines at size 1, ms: spread over more than an octave, so their modes interleave. */
+const HALL_MS = [31.7, 37.3, 41.9, 47.9, 53.3, 61.1, 67.7, 79.3];
+/** How slowly each line's length wanders, Hz: all different, none a multiple of another. */
+const HALL_RATES = [0.11, 0.17, 0.23, 0.29, 0.37, 0.43, 0.53, 0.61];
+/** An allpass inside each line, ms: every pass round the loop smears each echo into several. */
+const HALL_AP_MS = [5.3, 7.1, 8.9, 6.1, 9.7, 4.7, 7.9, 5.9];
+/** Input diffusers from Dattorro's plate ("Effect Design, Part 1", JAES 1997): length ms, allpass coefficient. */
+const DIFFUSERS: readonly (readonly [number, number])[] = [[4.771, 0.75], [3.595, 0.75], [12.735, 0.625], [
+  9.307,
+  0.625,
+]];
+/** Sends the tail as loud as freeverb's at the same wet level (their energies measured on the same input). */
+const HALL_GAIN = 0.111;
+const HADAMARD_NORM = 1 / Math.sqrt(8);
+
+export interface HallOptions {
+  /** T60 of the lows and mids, s, and at 4 kHz: a hall's air and surfaces take the highs first. */
+  t60: number;
+  t60hi: number;
+  /** Return gain, as freeverb's `wet`. */
+  wet: number;
+  /** Samples before the tail starts. */
+  pre: number;
+  /** Share of the tail fed back an octave up (0 = none): the shimmer of an ambient guitar rig. */
+  shimmer: number;
+}
+
+const isPrime = (n: number) => {
+  for (let k = 2; k * k <= n; k++) if (n % k === 0) return false;
+  return n > 1;
+};
+
+/**
+ * A hall: a feedback delay network of eight lines (Jot's design: an orthogonal mix between them, here a Hadamard, and
+ * a loss filter in each in proportion to its length, so every mode at a frequency decays at the rate set for it),
+ * fed through four diffusers so the echoes thicken at once, with an allpass in each line to keep thickening them.
+ * Each line's length wanders by 0.5 ms at its own slow rate: the modes never ring still, and the tail doesn't repeat
+ * itself every few tens of milliseconds as a comb reverb's does (which is what makes one sound metallic).
+ */
+export function hall(sr: number, inp: Float32Array, oL: Float32Array, oR: Float32Array, o: HallOptions): void {
+  const N = 8;
+  const len = HALL_MS.map((ms) => {
+    let L = Math.round((ms * sr) / 1000);
+    while (!isPrime(L)) L++;
+    return L;
+  });
+  const depth = 0.0005 * sr;
+  const size = len.map((L) => L + Math.ceil(depth) + 2);
+  const buf = size.map((s) => new Float64Array(s));
+  const wp = new Int32Array(N);
+  // per line: its gain at DC and a one-pole low-pass that takes the gain down to 4 kHz's (as Loop in strings.ts)
+  const ap = HALL_AP_MS.map((ms) => {
+    let L = Math.round((ms * sr) / 1000);
+    while (!isPrime(L)) L++;
+    return { b: new Float64Array(L), i: 0 };
+  });
+  const g = new Float64Array(N);
+  const c = new Float64Array(N);
+  const wh = (TAU * 4000) / sr;
+  len.forEach((L0, i) => {
+    // the allpass lengthens the loop by its own delay, on average
+    const L = L0 + ap[i].b.length;
+    g[i] = 10 ** ((-3 * L) / (sr * o.t60));
+    const r = 10 ** ((-3 * L) / (sr * o.t60hi)) / g[i];
+    const A = 1 - r * r;
+    const B = 1 - r * r * Math.cos(wh);
+    c[i] = A > 1e-9 ? (B - Math.sqrt(Math.max(0, B * B - A * A))) / A : 0;
+  });
+  // each line's wander, a rotating phasor
+  const cs = HALL_RATES.map((_, i) => Math.cos(0.8 * i));
+  const sn = HALL_RATES.map((_, i) => Math.sin(0.8 * i));
+  const rc = HALL_RATES.map((r) => Math.cos((TAU * r) / sr));
+  const rs = HALL_RATES.map((r) => Math.sin((TAU * r) / sr));
+  const dif = DIFFUSERS.map(([ms, k]) => ({ b: new Float64Array(Math.round((ms * sr) / 1000)), k, i: 0 }));
+  const lp = new Float64Array(N);
+  const v = new Float64Array(N);
+  // the input enters the lines with alternating signs; the ears hear two other orthogonal sign patterns
+  const IN = [1, -1, 1, -1, 1, -1, 1, -1];
+  const PL = [1, 1, -1, -1, 1, 1, -1, -1];
+  const PR = [1, -1, -1, 1, 1, -1, -1, 1];
+  const shift = o.shimmer > 0 ? new OctaveUp(Math.round(0.06 * sr)) : null;
+  const shp = new SVF(sr, 400, 0.7);
+  let fb = 0;
+  const k = HALL_GAIN * o.wet;
+  const n = Math.min(inp.length, oL.length);
+  for (let t = 0; t < n; t++) {
+    let x = (t >= o.pre ? inp[t - o.pre] : 0) + fb;
+    for (let j = 0; j < dif.length; j++) {
+      const d = dif[j];
+      const y = d.b[d.i] - d.k * x;
+      d.b[d.i] = x + d.k * y;
+      d.i = d.i + 1 < d.b.length ? d.i + 1 : 0;
+      x = y;
+    }
+    let yl = 0;
+    let yr = 0;
+    for (let i = 0; i < N; i++) {
+      const s = sn[i] * rc[i] + cs[i] * rs[i];
+      cs[i] = cs[i] * rc[i] - sn[i] * rs[i];
+      sn[i] = s;
+      const b = buf[i];
+      let r = wp[i] - len[i] - depth * s;
+      if (r < 0) r += size[i];
+      const r0 = r | 0;
+      const r1 = r0 + 1 < size[i] ? r0 + 1 : 0;
+      const d = b[r0] + (r - r0) * (b[r1] - b[r0]);
+      const a = ap[i];
+      const y = a.b[a.i] - 0.5 * d;
+      a.b[a.i] = d + 0.5 * y;
+      a.i = a.i + 1 < a.b.length ? a.i + 1 : 0;
+      yl += PL[i] * y;
+      yr += PR[i] * y;
+      lp[i] += (1 - c[i]) * (y - lp[i]);
+      v[i] = g[i] * lp[i];
+    }
+    // Hadamard mix (a fast Walsh-Hadamard transform), normalized: lossless, so only the loss filters decay the tail
+    const a0 = v[0] + v[1], a1 = v[0] - v[1], a2 = v[2] + v[3], a3 = v[2] - v[3];
+    const a4 = v[4] + v[5], a5 = v[4] - v[5], a6 = v[6] + v[7], a7 = v[6] - v[7];
+    const b0 = a0 + a2, b2 = a0 - a2, b1 = a1 + a3, b3 = a1 - a3;
+    const b4 = a4 + a6, b6 = a4 - a6, b5 = a5 + a7, b7 = a5 - a7;
+    v[0] = b0 + b4;
+    v[4] = b0 - b4;
+    v[1] = b1 + b5;
+    v[5] = b1 - b5;
+    v[2] = b2 + b6;
+    v[6] = b2 - b6;
+    v[3] = b3 + b7;
+    v[7] = b3 - b7;
+    for (let i = 0; i < N; i++) {
+      buf[i][wp[i]] = v[i] * HADAMARD_NORM + IN[i] * x;
+      wp[i] = wp[i] + 1 < size[i] ? wp[i] + 1 : 0;
+    }
+    if (shift) {
+      shp.run(yl + yr);
+      fb = (o.shimmer * shift.run(shp.hp)) / 16;
+    }
+    oL[t] += yl * k;
+    oR[t] += yr * k;
+  }
+}
+
+/**
+ * An octave up: two taps sweep through a short delay line at twice the speed it is written, each fading in and out
+ * (sin^2 windows half a sweep apart sum to 1) so the jumps back never click.
+ */
+class OctaveUp {
+  private readonly buf: Float64Array;
+  private w = 0;
+  private ph = 0;
+  constructor(private readonly W: number) {
+    this.buf = new Float64Array(W + 4);
   }
   run(x: number): number {
-    const [b0, b1, b2, a1, a2] = this.c;
-    const y = b0 * x + this.z1;
-    this.z1 = b1 * x - a1 * y + this.z2;
-    this.z2 = b2 * x - a2 * y;
+    const b = this.buf;
+    const L = b.length;
+    b[this.w] = x;
+    let y = 0;
+    for (let k = 0; k < 2; k++) {
+      const p = k ? (this.ph + 0.5) % 1 : this.ph;
+      // the tap's delay falls from W to 0 over its sweep: read at twice the write speed
+      let r = this.w - 1 - (1 - p) * this.W;
+      if (r < 0) r += L;
+      const r0 = r | 0;
+      const r1 = r0 + 1 < L ? r0 + 1 : 0;
+      const s = Math.sin(Math.PI * p);
+      y += s * s * (b[r0] + (r - r0) * (b[r1] - b[r0]));
+    }
+    this.ph += 1 / this.W;
+    if (this.ph >= 1) this.ph -= 1;
+    this.w = this.w + 1 < L ? this.w + 1 : 0;
+    return y;
+  }
+}
+
+/**
+ * A light stereo chorus as side signal: two taps, at `ms` and 1.57 times it, swaying in opposite phase by `depth` ms
+ * at `rate` Hz; their difference goes to the sides (left mid + side, right mid - side) and nothing to the mid, so the
+ * mono sum is the dry signal untouched. `at` is the time (s) the first sample is played: the sway runs on the
+ * section's clock, so voices chorused one by one sum to the whole part chorused at once.
+ */
+export class Chorus {
+  private readonly buf: Float64Array;
+  private w = 0;
+  private readonly cs: number;
+  private readonly sn: number;
+  private c: number;
+  private s: number;
+  private readonly d: number;
+  private readonly depth: number;
+  side = 0;
+  constructor(sr: number, at: number, ms: number, depth: number, rate: number, private readonly mix: number) {
+    this.d = (ms / 1000) * sr;
+    this.depth = (depth / 1000) * sr;
+    this.buf = new Float64Array(Math.ceil(1.57 * this.d + this.depth) + 3);
+    this.c = Math.cos(TAU * rate * at);
+    this.s = Math.sin(TAU * rate * at);
+    this.cs = Math.cos((TAU * rate) / sr);
+    this.sn = Math.sin((TAU * rate) / sr);
+  }
+  /** Takes a sample, returns it (the mid) and leaves the side in `side`. */
+  run(x: number): number {
+    const b = this.buf;
+    const L = b.length;
+    b[this.w] = x;
+    const tap = (d: number) => {
+      let r = this.w - d;
+      if (r < 0) r += L;
+      const r0 = r | 0;
+      const r1 = r0 + 1 < L ? r0 + 1 : 0;
+      return b[r0] + (r - r0) * (b[r1] - b[r0]);
+    };
+    this.side = (this.mix * (tap(this.d + this.depth * this.s) - tap(1.57 * this.d - this.depth * this.s))) / 2;
+    const s = this.s * this.cs + this.c * this.sn;
+    this.c = this.c * this.cs - this.s * this.sn;
+    this.s = s;
+    this.w = this.w + 1 < L ? this.w + 1 : 0;
+    return x;
+  }
+}
+
+/** A biquad in transposed direct form II. */
+export class Biquad {
+  private z1 = 0;
+  private z2 = 0;
+  constructor(
+    private readonly b0: number,
+    private readonly b1: number,
+    private readonly b2: number,
+    private readonly a1: number,
+    private readonly a2: number,
+  ) {}
+  run(x: number): number {
+    const y = this.b0 * x + this.z1;
+    this.z1 = this.b1 * x - this.a1 * y + this.z2;
+    this.z2 = this.b2 * x - this.a2 * y;
+    return y;
+  }
+}
+
+/** A filter section: 2nd-order low-pass, high-pass or peak; corner or centre in Hz, Q, and a peak's gain in dB. */
+export type Section = readonly [kind: 'lp' | 'hp' | 'peak', hz: number, q: number, db?: number];
+
+/**
+ * A section's biquad coefficients [b0, b1, b2, a1, a2] (R. Bristow-Johnson's Audio EQ Cookbook): the same shape at
+ * any rate well above its corner.
+ */
+export function coefs(sr: number, [kind, hz, q, db = 0]: Section): [number, number, number, number, number] {
+  const w = (TAU * Math.min(hz, 0.45 * sr)) / sr;
+  const cw = Math.cos(w);
+  const al = Math.sin(w) / (2 * q);
+  const A = 10 ** (db / 40);
+  const [b0, b1, b2, a0] = kind === 'peak'
+    ? [1 + al * A, -2 * cw, 1 - al * A, 1 + al / A]
+    : kind === 'lp'
+    ? [(1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + al]
+    : [(1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + al];
+  const a2 = kind === 'peak' ? 1 - al / A : 1 - al;
+  return [b0 / a0, b1 / a0, b2 / a0, (-2 * cw) / a0, a2 / a0];
+}
+
+/** Sections in series (a fitted response, such as a speaker cabinet's), as biquads in transposed direct form II. */
+export class Chain {
+  private readonly c: Float64Array;
+  private readonly z: Float64Array;
+  constructor(sr: number, sections: readonly Section[]) {
+    this.c = Float64Array.from(sections.flatMap((x) => coefs(sr, x)));
+    this.z = new Float64Array(2 * sections.length);
+  }
+  run(x: number): number {
+    const c = this.c;
+    const z = this.z;
+    for (let j = 0, q = 0; j < c.length; j += 5, q += 2) {
+      const y = c[j] * x + z[q];
+      z[q] = c[j + 1] * x - c[j + 3] * y + z[q + 1];
+      z[q + 1] = c[j + 2] * x - c[j + 4] * y;
+      x = y;
+    }
+    return x;
+  }
+}
+
+/**
+ * An analog filter (b[0] s^2 + b[1] s + b[2]) / (a[0] s^2 + a[1] s + a[2]) as a biquad, by the bilinear transform
+ * warped to be exact at `at` Hz: a circuit's response from its component values.
+ */
+export function analog(sr: number, b: readonly number[], a: readonly number[], at: number): Biquad {
+  const c = (TAU * at) / Math.tan((Math.PI * at) / sr);
+  const c2 = c * c;
+  const d = a[0] * c2 + a[1] * c + a[2];
+  return new Biquad(
+    (b[0] * c2 + b[1] * c + b[2]) / d,
+    (2 * b[2] - 2 * b[0] * c2) / d,
+    (b[0] * c2 - b[1] * c + b[2]) / d,
+    (2 * a[2] - 2 * a[0] * c2) / d,
+    (a[0] * c2 - a[1] * c + a[2]) / d,
+  );
+}
+
+/** tanh by its [3/2] Pade approximant, clamped at +-1 from |x| = 3, where value and slope meet: a cheap soft clip. */
+export const softClip = (x: number): number => (x >= 3 ? 1 : x <= -3 ? -1 : (x * (27 + x * x)) / (27 + 9 * x * x));
+
+/**
+ * Twice the sample rate for a nonlinearity (its harmonics above the Nyquist frequency fold back as inharmonic grit):
+ * a 15-tap half-band interpolator in, the same half-band out. `run` takes one sample and `f`, the nonlinearity at the
+ * doubled rate, and returns one sample, 7 samples late.
+ */
+export class Oversampled {
+  // half-band taps at odd offsets 1, 3, 5, 7 from the centre: a Blackman-windowed sinc, normalized for unit DC gain
+  private static readonly C = (() => {
+    const c = [0, 1, 2, 3].map((k) => {
+      const m = 2 * k + 1;
+      const w = 0.42 + 0.5 * Math.cos((Math.PI * m) / 8) + 0.08 * Math.cos((2 * Math.PI * m) / 8);
+      return (Math.sin((Math.PI * m) / 2) / (Math.PI * m)) * w;
+    });
+    const s = c.reduce((a, b) => a + b, 0);
+    return c.map((v) => v / (2 * s));
+  })();
+  private readonly x = new Float64Array(8);
+  private readonly odd = new Float64Array(8);
+  private readonly even = new Float64Array(4);
+  private i = 0;
+
+  run(input: number, f: (x: number) => number): number {
+    const C = Oversampled.C;
+    const x = this.x;
+    const o = this.odd;
+    const i = this.i;
+    // newest input at x[i]; the midpoint between x[i-4] and x[i-3] from 4 inputs either side
+    x[i & 7] = input;
+    let mid = 0;
+    for (let k = 0; k < 4; k++) mid += C[k] * (x[(i - 4 - k) & 7] + x[(i - 3 + k) & 7]);
+    this.even[i & 3] = f(x[(i - 4) & 7]);
+    o[i & 7] = f(mid);
+    // decimate: the centre tap (1/2) on the even sample 3 steps back, the odd taps on the odd samples around it
+    let y = 0.5 * this.even[(i - 3) & 3];
+    for (let k = 0; k < 4; k++) y += 0.5 * C[k] * (o[(i - 4 - k) & 7] + o[(i - 3 + k) & 7]);
+    this.i = i + 1;
     return y;
   }
 }

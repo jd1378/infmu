@@ -159,9 +159,12 @@ const FEEL: Partial<Record<StyleId, Record<Limb, number>>> = {
 export const drummed = (style: StyleId): boolean => style in FEEL;
 
 /** How far each limb's dynamics reach: a stroke's level against the loudest of its part is raised to this. */
-const REACH: Record<Limb, number> = { kick: 1, snare: 1.6, hat: 1.3, perc: 1.3, tom: 1.2 };
+// a real ghost note sits 19 to 25 dB under the backbeat (measured on recorded kits): x^2 puts the grid's ghost
+// ('-', 0.42) 15 dB down, and the drummer's own variation spreads it from there
+const REACH: Record<Limb, number> = { kick: 1, snare: 2, hat: 1.3, perc: 1.3, tom: 1.2 };
 
-const limbOf = (e: Hit): Limb => e.i === 'perc' ? (e.k === 'ride' || e.k === 'crash' ? 'hat' : 'perc') : e.i;
+const CYMBALS: ReadonlySet<string> = new Set(['ride', 'crash', 'acousticRide', 'acousticCrash']);
+const limbOf = (e: Hit): Limb => e.i === 'perc' ? (CYMBALS.has(e.k) ? 'hat' : 'perc') : e.i;
 
 /**
  * A drummer plays the written kit: ghost notes fall well under the backbeat (a machine plays the grid's three
@@ -179,7 +182,7 @@ function drummer(ctx: Ctx): void {
   for (const e of ctx.events) {
     if (e.i !== 'kick' && e.i !== 'snare' && e.i !== 'hat' && e.i !== 'perc' && e.i !== 'tom') continue;
     // each tom is a drum of its own
-    const part = `${e.i}:${'k' in e ? e.k : e.i === 'tom' ? e.n : ''}`;
+    const part = `${e.i}:${e.i === 'tom' ? e.n : 'k' in e ? e.k : ''}`;
     const known = parts.get(part);
     if (known) known.push(e);
     else parts.set(part, [e]);
