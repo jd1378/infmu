@@ -7,6 +7,7 @@ import {
   chorusMelody,
   halves,
   introPreview,
+  leadIn,
   motifs,
   play,
   ringOut,
@@ -102,11 +103,8 @@ export function rise(ctx: Ctx): void {
       }
       runRoll(ctx, 0.35, 0.85);
       runRiser(ctx, 'build', true);
-      // the silence before the drop: a sixteenth of breath, or a whole beat with the room cut dead
-      if (ctx.nextRole === 'drop') {
-        if (mrng.fork('drop-gap').chance(0.5)) stopBefore(ctx, 1, false);
-        else ctx.push({ i: 'breath', t: ctx.duration - ctx.s16, d: ctx.s16 });
-      }
+      // the silence before the drop: a beat with the room cut dead, kept for the last one
+      leadIn(ctx, { chance: 0.6, longest: 1, room: false });
       break;
     case 'drop': {
       if (ctx.inRun === 0) {
@@ -233,7 +231,7 @@ export function pulse(ctx: Ctx): void {
         }
       }
       roll(ctx, last, [[1, 8]], 0.4, 0.8, 'gated');
-      if (mrng.fork('pre-stop').chance(0.6)) stopBefore(ctx, 1);
+      if (ctx.rng.fork('pre-stop').chance(0.35)) stopBefore(ctx, 1);
       break;
     case 'chorus':
       if (ctx.prevRole !== 'chorus') crash(ctx);
@@ -337,7 +335,7 @@ export function acid(ctx: Ctx): void {
       line(0, bars, ...span(ctx, 500, 3800), 0.9, 1);
       runRoll(ctx, 0.3, 0.85);
       runRiser(ctx, 'sweep', false);
-      if (ctx.nextRole === 'drop') stopBefore(ctx, 2, false);
+      leadIn(ctx, { chance: 0.7, longest: 1, room: false });
       break;
     case 'drop':
       if (ctx.prevRole !== 'drop') {

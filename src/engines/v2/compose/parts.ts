@@ -136,6 +136,32 @@ export function runRiser(ctx: Ctx, k: 'build' | 'sweep', sweep: boolean): void {
   if (sweep) ctx.push({ i: 'sweep', t: 0, d: ctx.duration, x0, x1 });
 }
 
+/**
+ * A drummer's roll around the toms into a climax, over the last `bars` bars of the section: eighths, then 16ths in
+ * the last bar, high tom to floor tom and round again, louder all the way (the toms tuned to the key, as the
+ * groove's are).
+ */
+export function tomRoll(ctx: Ctx, bars: number, v0 = 0.45, v1 = 1, k?: TomKind): void {
+  const lo = ctx.tonicLow + 12;
+  const toms = [lo + 12, lo + 7, lo];
+  const from = Math.max(0, ctx.bars - bars);
+  const hits: number[] = [];
+  for (let b = from; b < ctx.bars; b++) {
+    const rate = b === ctx.bars - 1 ? 1 : 2;
+    for (let s = 0; s < ctx.spb; s += rate) hits.push(b * ctx.spb + s);
+  }
+  hits.forEach((step, i) => {
+    const x = i / Math.max(1, hits.length - 1);
+    ctx.push({
+      i: 'tom',
+      t: ctx.at(step),
+      v: v0 + (v1 - v0) * x ** 1.5,
+      n: toms[Math.floor(i / 2) % 3],
+      ...(k ? { k } : {}),
+    });
+  });
+}
+
 /** Four toms falling through the chord on the last beat of a bar. */
 export function tomFill(ctx: Ctx, bar: number, slot: ChordSlot, v = 0.8, k?: TomKind): void {
   const ns = slot.voicing.slice().sort((a, b) => b - a).slice(0, 4).map((n) => n - 12);

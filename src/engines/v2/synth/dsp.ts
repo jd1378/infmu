@@ -541,3 +541,101 @@ export class Wander {
     return this.b * this.norm;
   }
 }
+
+/**
+ * A compressor: `threshold` (dB, of the sidechain's rms over `rms` seconds: a few ms hears the body of a hit, a
+ * fraction of one its crack), `ratio`, a soft `knee` (dB wide), the `attack` and `release` of its fast stage (s), and
+ * `slow`, the release of its slow stage (s); `hp`, the corner (Hz) of a high-pass on the sidechain, so the lowest notes
+ * don't ride the gain (0: none).
+ */
+export interface Comp {
+  threshold: number;
+  rms: number;
+  ratio: number;
+  knee: number;
+  attack: number;
+  release: number;
+  slow: number;
+  hp: number;
+}
+/** The slow stage's attack: it only takes hold of compression that lasts. */
+const SLOW_ATTACK = 0.4;
+/** How many seconds of a section's start the slow stage is wound up on (see compress()). */
+const PRIME = 2;
+
+/**
+ * A feed-forward compressor's gain curve for the stereo signal `L`, `R` (linked, as a bus compressor is): the static
+ * soft-knee curve in dB (Giannoulis, Massberg and Reiss, "Digital dynamic range compressor design", JAES 2012) on the
+ * rms of the sidechain, smoothed in dB by two stages: a fast one for the hits and a slow one for what lasts, the deeper
+ * of the two winning. So the release is program-dependent, as a console's auto release is: quick after a hit, slow
+ * after a long loud passage, with no pumping under a sustained wall. The slow stage starts where running backwards
+ * over the first seconds leaves it: a section that starts loud starts compressed instead of ducking in once its attack
+ * catches up.
+ */
+export function compress(sr: number, L: Float32Array, R: Float32Array, c: Comp): Float32Array {
+  const n = Math.min(L.length, R.length);
+  const target = new Float32Array(n);
+  const f = c.hp > 0 ? [new SVF(sr, c.hp, 0.7), new SVF(sr, c.hp, 0.7)] : null;
+  const k = 1 - Math.exp(-1 / (c.rms * sr));
+  const { threshold: T, knee: W } = c;
+  const slope = 1 / c.ratio - 1;
+  let ms = 0;
+  for (let i = 0; i < n; i++) {
+    let l = L[i];
+    let r = R[i];
+    if (f) {
+      f[0].run(l);
+      f[1].run(r);
+      l = f[0].hp;
+      r = f[1].hp;
+    }
+    ms += k * ((l * l + r * r) / 2 - ms);
+    const over = 10 * Math.log10(ms + 1e-20) - T;
+    target[i] = 2 * over < -W ? 0 : 2 * over > W ? slope * over : (slope * (over + W / 2) ** 2) / (2 * W);
+  }
+  const co = (s: number) => Math.exp(-1 / (s * sr));
+  const [fa, fr, sa, sl] = [co(c.attack), co(c.release), co(SLOW_ATTACK), co(c.slow)];
+  let fast = 0;
+  let slow = 0;
+  const step = (g: number) => {
+    fast = g < fast ? fa * fast + (1 - fa) * g : fr * fast + (1 - fr) * g;
+    slow = g < slow ? sa * slow + (1 - sa) * g : sl * slow + (1 - sl) * g;
+  };
+  // the slow stage wound up on the first seconds, the fast one from it: the first hit meets the compressor as a later
+  // one does (winding up the fast one too would take the first hit down before it came)
+  for (let i = Math.min(n, Math.round(PRIME * sr)) - 1; i >= 0; i--) step(target[i]);
+  fast = slow;
+  for (let i = 0; i < n; i++) {
+    step(target[i]);
+    target[i] = 10 ** (Math.min(fast, slow) / 20);
+  }
+  return target;
+}
+
+/** `f` applied at twice the rate (see Oversampled) to `x` times `gain`, into `out`, on time (its latency taken out). */
+export function oversampled(x: Float32Array, f: (x: number) => number, gain = 1, out = x): Float32Array {
+  const os = new Oversampled();
+  const n = Math.min(x.length, out.length);
+  for (let i = 0; i < n + OVERSAMPLED_LAG; i++) {
+    const y = os.run(i < n ? x[i] * gain : 0, f);
+    if (i >= OVERSAMPLED_LAG) out[i - OVERSAMPLED_LAG] = y;
+  }
+  return out;
+}
+/** Samples an Oversampled's output lags its input. */
+const OVERSAMPLED_LAG = 7;
+
+/**
+ * A soft clipper: the level passes untouched up to `knee`, and above it bends smoothly (a tanh from the knee, slope
+ * continuous) up to `ceil`. Run at twice the rate (see Oversampled), it rounds the fastest peaks as tape and a console
+ * driven hard do, so the limiter after it has less to do.
+ */
+export function clipper(knee: number, ceil: number): (x: number) => number {
+  const room = ceil - knee;
+  return (x) => {
+    const a = x < 0 ? -x : x;
+    if (a <= knee) return x;
+    const y = knee + room * softClip((a - knee) / room);
+    return x < 0 ? -y : y;
+  };
+}

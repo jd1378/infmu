@@ -70,6 +70,11 @@ export interface Mix {
   hall?: boolean;
   /** Share of the hall's tail fed back an octave up (0 or absent: none). */
   shimmer?: number;
+  /**
+   * How it is mixed and mastered: absent, the gentle glue of the rest; 'rock', a rock record's buses (a compressed drum
+   * bus with a crushed copy under it, the band glued by a bus compressor, printed to tape, a loud master).
+   */
+  bus?: 'rock';
 }
 
 /** An amp's voice: a crunchy rock amp, or a Big Muff into a big amp and a 4x12 (post-rock's wall). */
@@ -108,7 +113,15 @@ export type SnareKind = 'roll' | 'big' | 'huge' | 'clap' | 'dusty' | 'gated' | '
 /** A tom without a kind is the synth tom. */
 export type TomKind = 'acoustic';
 export type HatKind = 'closed' | 'open' | 'shaker' | 'dusty';
-export type BassKind = 'heart' | 'sub' | 'saw' | 'roll' | 'round' | 'pulse' | '808';
+/**
+ * Synth basses, and two bass guitars (a string model fitted to recorded basses, see synth/strings.ts): `pick`, a
+ * Precision played with a pick into a driven Ampeg-style amp and a DI (post-rock's and rock's bass: a click on every
+ * note, the frets buzzing when it is dug in, the amp's growl), and `finger`, the same bass fingered, rounder and
+ * cleaner. For the guitars `v` is how hard the string is played (brightness, buzz, drive, not only level), `d` how
+ * long the fretting hand holds the note (then it mutes the string) and `rel` how long the muted string takes to die
+ * (default 0.1 s: a longer one lets the last note ring out).
+ */
+export type BassKind = 'heart' | 'sub' | 'saw' | 'roll' | 'round' | 'pulse' | '808' | 'pick' | 'finger';
 export type PadKind = 'warm' | 'wide' | 'drop' | 'stab' | 'bloom' | 'glass' | 'strings';
 export type LeadKind = 'hook' | 'hook2' | 'brass' | 'flute' | 'saw';
 export type ImpactKind = 'ping' | 'hit' | 'soft' | 'drop' | 'cosmic' | 'final';
@@ -181,6 +194,16 @@ export type Ev =
    * rather than picked; `slide`, slid into from this many semitones away; `squeak`, how loud the hand squeaks
    * along a wound string as it shifts to the note (0 to 1); `swell`, seconds a note takes to swell in with no
    * attack at all (a volume pedal, an EBow).
+   *
+   * `vib`: how wide the fretting finger's vibrato is on a note held for `d` seconds, as a multiple of the player's
+   * usual (on an electric a sine of about ±22 cents, ±13 on the acoustic `guitar`, varying note to note; never on the
+   * harp; it comes in 0.1 to 0.3 s after the pick, at 4.5 to 5.9 Hz, and widens as the note is held): 0 for none, 1
+   * the usual, 2 wide. Absent, a held note of a line (`lead` set, true or false, `d` at least 0.35 s, not a `swell`)
+   * gets 1, and a chord's or an arpeggio's note (no `lead`) none.
+   * `feedback`: on a held `overdrive` note, how loud the amp's feedback blooms: one of the string's harmonics (between
+   * 320 and 900 Hz) swells in over one to two seconds from about half a second after the pick and sings over the
+   * chord until the note stops (0 none, 1 the usual, 2 it takes the note over). Absent, the first note of 2 s or more
+   * that finds its amp (its guitarist) not already feeding back blooms, six times in ten.
    */
   | {
     i: 'string';
@@ -195,6 +218,8 @@ export type Ev =
     slide?: number;
     squeak?: number;
     swell?: number;
+    vib?: number;
+    feedback?: number;
   }
   | { i: 'mallet'; t: number; n: number; v: number; k: MalletKind; p?: number; lead?: boolean }
   /** `pedal`: the sustain pedal is down while it sounds, so the undamped strings answer it. */

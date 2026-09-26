@@ -1,5 +1,6 @@
 // Drift (ambient), Cathedral (cinematic) and Ember (post-rock).
 
+import type { BassKind } from '../../types.ts';
 import type { Ctx } from '../context.ts';
 import { CATHEDRAL_TIMES, DRIFT_TIMES, EMBER_TIMES, grooveBar, grooveFor, inTime, playGroove } from '../grooves.ts';
 import {
@@ -7,6 +8,7 @@ import {
   chorusMelody,
   halves,
   introPreview,
+  leadIn,
   motifs,
   play,
   ringOut,
@@ -23,6 +25,7 @@ import {
   arp,
   arpNotes,
   bassFigure,
+  type BassHit,
   crash,
   droneVoicing,
   drums,
@@ -37,6 +40,7 @@ import {
   stab,
   sustainedBass,
   tomFill,
+  tomRoll,
   tremolo,
 } from '../parts.ts';
 import { phrase } from '../melody.ts';
@@ -238,10 +242,7 @@ export function cathedral(ctx: Ctx): void {
       }
       runRoll(ctx, 0.45, 0.9);
       runRiser(ctx, 'build', false);
-      if (ctx.nextRole === 'drop') {
-        if (mrng.fork('drop-gap').chance(0.5)) stopBefore(ctx, 2);
-        else ctx.push({ i: 'breath', t: ctx.duration - ctx.s16, d: ctx.s16 });
-      }
+      leadIn(ctx, { chance: 0.5, longest: 1.5, room: true });
       break;
     }
     case 'drop':
@@ -374,6 +375,15 @@ export function ember(ctx: Ctx): void {
       }
     }
   };
+  // the bass guitar, re-picked as a bassist plays (a real string dies away; it isn't a pad): fingered on the strong
+  // beats in the quiet, picked on the beats as a build starts, driving picked eighths into and through a climax
+  const onStrongs: BassHit[] = ctx.strongs.map((s, i, all) => [s, (all[i + 1] ?? ctx.spb) - s, 0, i ? 0.85 : 1]);
+  const onBeats: BassHit[] = [...Array(ctx.spb).keys()].filter((s) => ctx.onBeat(s))
+    .map((s) => [s, ctx.mv.meter === '6/8' ? 6 : 4, 0, ctx.strong(s) ? 1 : 0.8]);
+  const eighths: BassHit[] = EIGHTHS.filter(([s]) => s < ctx.spb);
+  const bassline = (hits: readonly BassHit[], k: BassKind, v: (b: number) => number, from = 0, to = bars) => {
+    for (let b = from; b < to; b++) bassFigure(ctx, b, hits, k, v(b));
+  };
   // the theme, slow, on the delay guitar (a glockenspiel an octave up, sometimes)
   const line = () => phrase(ctx, theme, 0, bars, { center: 4, lo: 0, hi: 11, stretch: 2 }, 'period');
   const stateTheme = (gain: number) => {
@@ -404,7 +414,7 @@ export function ember(ctx: Ctx): void {
         // the second guitar joins once the theme has been heard
         if (ctx.returning || ctx.runBar(b) >= 8) interlock(b, 0.3);
       }
-      if (ctx.returning || ctx.runBar(0) >= 8) sustainedBass(ctx, 'round', 0.45);
+      if (ctx.returning || ctx.runBar(0) >= 8) bassline(onStrongs, 'finger', () => 0.45);
       stateTheme(0.9);
       break;
     case 'build': {
@@ -412,7 +422,7 @@ export function ember(ctx: Ctx): void {
       padChords(ctx, 'strings', { cut: (slot) => runCut(ctx, slot, 900, 4200), g: 0.45 });
       // the bass holds the chords until the drums drive, then plays eighths (below)
       const drive = Math.max(0, Math.min(bars, Math.ceil(ctx.runBars / 2 - ctx.runStartBar)));
-      if (ctx.runAt(1) > 0.25 && drive > 0) sustainedBass(ctx, 'saw', 0.5, 0, drive);
+      if (ctx.runAt(1) > 0.25 && drive > 0) bassline(onBeats, 'pick', (b) => 0.5 + 0.1 * x(b), 0, drive);
       for (let b = 0; b < bars; b++) {
         playGroove(ctx, g, b, { ...heavy, gain: 0.35 + 0.65 * x(b) });
         if (x(b) < 0.5) {
@@ -420,7 +430,7 @@ export function ember(ctx: Ctx): void {
           interlock(b, 0.35 + 0.2 * x(b));
         } else {
           // the bass drives eighths into the climax
-          bassFigure(ctx, b, EIGHTHS.filter(([st]) => st < ctx.spb), 'round', 0.5 + 0.3 * x(b));
+          bassFigure(ctx, b, eighths, 'pick', 0.55 + 0.3 * x(b));
         }
       }
       // past halfway the guitar tremolos the chord tones and the wall comes in
@@ -439,10 +449,12 @@ export function ember(ctx: Ctx): void {
         wall(0.55, half, bars);
       }
       if (ctx.runAt(1) >= 0.75) runRoll(ctx, 0.3, 0.9, 'acoustic');
+      // the drummer takes the last two bars round the toms
+      if (ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') tomRoll(ctx, Math.min(2, bars), 0.45, 1, 'acoustic');
       if (ctx.nextRole !== 'build') {
         ctx.push({ i: 'rise', t: ctx.duration - 2 * ctx.bar, d: 2 * ctx.bar, k: 'cymbal' });
-        // the breath before the wall
-        if (ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') stopBefore(ctx, 2, false);
+        // the band stops, the room rings, the wall comes in: only sometimes, and only before the last climax
+        leadIn(ctx, { chance: 0.5, longest: 1, room: true });
       }
       break;
     }
@@ -452,7 +464,7 @@ export function ember(ctx: Ctx): void {
       if (ctx.prevRole !== ctx.role) crash(ctx, 0, 1, true);
       padChords(ctx, 'strings', { cut: () => [1600, 2400], g: 0.5 });
       if (final) choir(ctx, 'a', 0.45);
-      sustainedBass(ctx, 'saw', 0.85);
+      bassline(eighths, 'pick', () => 0.85);
       wall(final ? 1 : 0.85);
       for (let b = 0; b < bars; b++) playGroove(ctx, g, b, heavy);
       soar(final ? 0.9 : 0.8);
@@ -476,7 +488,7 @@ export function ember(ctx: Ctx): void {
     default:
       padChords(ctx, 'warm', { cut: (slot) => runCut(ctx, slot, 1400, 500), g: 0.4, rel: 3 });
       swells(0.4 * (1 - ctx.runAt(0)));
-      sustainedBass(ctx, 'round', 0.4, 0, runHalf(ctx), 2);
+      bassline(onStrongs, 'finger', (b) => 0.45 * (1 - x(b)), 0, runHalf(ctx));
       for (let b = 0; b < bars; b++) if (ctx.runBar(b) < ctx.runBars - 1) shimmer(b, 0.35 * (1 - x(b)));
       if (glock) {
         play(

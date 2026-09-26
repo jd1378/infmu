@@ -208,6 +208,23 @@ export function stopBefore(ctx: Ctx, longest: number, room = true): void {
   ctx.hush(ctx.duration - breath(ctx, longest) * ctx.beat, ctx.duration, room);
 }
 
+/**
+ * How a build hands over to the climax it leads into. The silence before a drop is strongest when it is rare:
+ * only the lead-in to the piece's last climax may stop (with `chance`, for at most `longest` beats; `room` false
+ * cuts the reverb too). Earlier builds run straight in, now and then with a 16th's breath.
+ */
+export function leadIn(ctx: Ctx, o: { chance: number; longest: number; room: boolean }): void {
+  const next = ctx.nextRole;
+  if (ctx.isLast || (next !== 'drop' && next !== 'chorus')) return;
+  const secs = ctx.mv.sections;
+  let j = ctx.local + 1;
+  while (secs[j]?.role === next) j++;
+  const last = !secs.slice(j).some((s) => s.role === next);
+  const rng = ctx.rng.fork('lead-in');
+  if (last && rng.chance(o.chance)) stopBefore(ctx, o.longest, o.room);
+  else if (rng.chance(0.35)) ctx.push({ i: 'breath', t: ctx.duration - ctx.s16, d: ctx.s16 });
+}
+
 /** Stop-time: the band plays the downbeat of `bar` together, then holds its breath for most of the bar. */
 export function stopTime(ctx: Ctx, bar: number): void {
   const from = ctx.rng.fork('stop-time').weighted([[2, 1], [4, 2], [6, 3], [8, 3]] as const);

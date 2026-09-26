@@ -890,3 +890,31 @@ Deno.test('post-rock rises in long waves: quiet without drums, a crescendo, the 
     });
   }
 });
+
+Deno.test('a build stops before a climax rarely: only before the last one, and briefly', () => {
+  for (const style of ['ember', 'acid', 'rise', 'cathedral'] as const) {
+    let stops = 0;
+    for (let k = 0; k < 8; k++) {
+      const song = new Song(`lead-in-${style}-${k}`, [style]);
+      const mv = song.movement(0);
+      let here = 0;
+      mv.sections.forEach((sec, i) => {
+        const next = mv.sections[i + 1]?.role;
+        if (sec.role !== 'build' || (next !== 'drop' && next !== 'chorus')) return;
+        const s = composeSection(song, mv.firstSection + i);
+        for (const e of s.events) {
+          if (e.i !== 'gap' || e.t + e.d < s.duration - 0.01) continue;
+          here++;
+          // a beat and a half at most (the tempo curve may stretch it a little)
+          assert(e.d <= 1.5 * (60 / mv.bpm) * 1.1, `${style}: a ${e.d.toFixed(2)} s stop`);
+          let j = i + 1;
+          while (mv.sections[j]?.role === next) j++;
+          assert(!mv.sections.slice(j).some((x) => x.role === next), `${style}: a stop before an early climax`);
+        }
+      });
+      assert(here <= 1, `${style}: ${here} stops in one piece`);
+      stops += here;
+    }
+    assert(stops < 8, `${style}: every piece stops before its climax`);
+  }
+});

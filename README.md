@@ -142,7 +142,8 @@ The instrument models were fitted to measurements of recordings (used only for m
 University of Iowa Musical Instrument Samples, VSCO 2 Community Edition and VCSL (CC0), FreePats (CC0), the Discord SFZ
 GM bank (Martin HD-28 by Jeff Learman, CC0), Big Rusty Drums by Karoryfer Samples (CC0, the acoustic drum kit), Jester
 Dyne Productions' Emerald and Brutal cabinet packs (CC0) and "Jensen Cab e606 right.wav" by jesterdyne
-(freesound.org/s/116748, CC BY 4.0) for the guitar cabinets, and Freesound packs by tim.kahn (CC BY 4.0) and hollandm
-(CC0). Melody statistics were checked against the POP909 dataset (MIT). The fuzz follows the published analysis of the
-Big Muff Pi circuit, the tape echo Chowdhury's and Arnardottir, Abel and Smith's models, and the hall reverb Jot's
-feedback delay networks with Dattorro's diffusers.
+(freesound.org/s/116748, CC BY 4.0) for the guitar cabinets, FreePats Bass YR and Karoryfer Growlybass (CC0) and
+tim.kahn's "C_S P-Bass pick" and "C_S P-Bass" packs (freesound.org/s/148249, freesound.org/s/43965, CC BY 4.0) for the
+bass guitar, and Freesound packs by tim.kahn (CC BY 4.0) and hollandm (CC0). Melody statistics were checked against the
+POP909 dataset (MIT). The fuzz follows the published analysis of the Big Muff Pi circuit, the tape echo Chowdhury's and
+Arnardottir, Abel and Smith's models, and the hall reverb Jot's feedback delay networks with Dattorro's diffusers.

@@ -4,7 +4,23 @@
 
 import { type AmpTone, type Ev, isMelody, type Mix, type Score } from '../types.ts';
 import { Bus } from './bus.ts';
-import { analog, Chain, freeverb, hall, lufs, Noise, Oversampled, type Section, softClip, SVF, TAU } from './dsp.ts';
+import {
+  analog,
+  Chain,
+  clipper,
+  type Comp,
+  compress,
+  freeverb,
+  hall,
+  lufs,
+  Noise,
+  Oversampled,
+  oversampled,
+  type Section,
+  softClip,
+  SVF,
+  TAU,
+} from './dsp.ts';
 import * as I from './instruments.ts';
 import { bell, mallet, perc, piano } from './modal.ts';
 import { string } from './strings.ts';
@@ -75,7 +91,7 @@ export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendere
   playAll(b, of('fx'), mix.amp);
   const against = (ref: number, offset: number, lo: number, hi: number) => (own: number) =>
     Number.isFinite(ref) && Number.isFinite(own) ? Math.min(hi, Math.max(lo, 10 ** ((ref + offset - own) / 20))) : 1;
-  stem(b, score, of('drums'), 0x1b873593, against(bed, mix.drums, 0.25, 2));
+  stem(b, score, of('drums'), 0x1b873593, against(bed, mix.drums, 0.25, 2), mix.bus === 'rock' ? drumBus : undefined);
   stem(b, score, of('bass'), 0x85ebca6b, against(bed, mix.bass, 0.25, 2));
   // measured once the rest of the band is in
   stem(
@@ -150,12 +166,23 @@ function dryLufs(x: Bus): number {
   return lufs(x.sr, x.L.map((v, i) => v + x.ML[i]), x.R.map((v, i) => v + x.MR[i]));
 }
 
-/** Renders a stem on buses of its own, then mixes it into `b` at the gain `level` gives for its loudness. */
-function stem(b: Bus, score: Score, events: readonly Ev[], salt: number, level: (own: number) => number): void {
+/**
+ * Renders a stem on buses of its own, runs its dry buses through `process` (a bus's own compressor), then mixes it
+ * into `b` at the gain `level` gives for its loudness.
+ */
+function stem(
+  b: Bus,
+  score: Score,
+  events: readonly Ev[],
+  salt: number,
+  level: (own: number) => number,
+  process?: (s: Bus) => void,
+): void {
   if (!events.length) return;
   const s = new Bus(b.sr, score.duration + score.tail, (score.noiseSeed ^ salt) >>> 0, score.movement.tone, b.a4);
   s.duck = b.duck;
   playAll(s, events, score.movement.mix.amp);
+  process?.(s);
   const g = level(dryLufs(s));
   for (const k of ['L', 'R', 'ML', 'MR', 'REV', 'DLY'] as const) {
     const from = s[k];
@@ -264,28 +291,32 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
   // leveling by measurement: each section is brought to the loudness its energy calls for
   const end = Math.round(score.duration * sr);
   const measured = lufs(sr, L, R, end);
-  const gain = Number.isFinite(measured)
-    ? Math.min(6, 10 ** ((targetLufs(mix, score.section.energy) - measured) / 20))
-    : 1;
-
-  // glue compressor, 2:1 above -10 dBFS
-  const ca = Math.exp(-1 / (0.01 * sr));
-  const cr = Math.exp(-1 / (0.15 * sr));
-  let env = 0;
-  const warm = tape(mix.warmth);
-  for (let i = 0; i < n; i++) {
-    const l = warm(L[i] * gain);
-    const r = warm(R[i] * gain);
-    const pk = Math.max(Math.abs(l), Math.abs(r));
-    env = pk > env ? ca * env + (1 - ca) * pk : cr * env + (1 - cr) * pk;
-    const over = 20 * Math.log10(env + 1e-9) + 10;
-    const gr = over > 0 ? 10 ** (-over / 40) : 1;
-    L[i] = l * gr;
-    R[i] = r * gr;
+  const target = targetLufs(mix, score.section.energy);
+  const gain = Number.isFinite(measured) ? Math.min(6, 10 ** ((target - measured) / 20)) : 1;
+  const stops = () => {
+    for (const s of ev('stop')) tapeStop(b, s.t, s.d);
+  };
+  let makeup = 1;
+  if (mix.bus === 'rock') makeup = rockMaster(b, mix, gain, target, end, stops);
+  else {
+    // glue compressor, 2:1 above -10 dBFS
+    const ca = Math.exp(-1 / (0.01 * sr));
+    const cr = Math.exp(-1 / (0.15 * sr));
+    let env = 0;
+    const warm = tape(mix.warmth);
+    for (let i = 0; i < n; i++) {
+      const l = warm(L[i] * gain);
+      const r = warm(R[i] * gain);
+      const pk = Math.max(Math.abs(l), Math.abs(r));
+      env = pk > env ? ca * env + (1 - ca) * pk : cr * env + (1 - cr) * pk;
+      const over = 20 * Math.log10(env + 1e-9) + 10;
+      const gr = over > 0 ? 10 ** (-over / 40) : 1;
+      L[i] = l * gr;
+      R[i] = r * gr;
+    }
+    stops();
+    limit(b, CEILING);
   }
-
-  for (const s of ev('stop')) tapeStop(b, s.t, s.d);
-  limit(b, 10 ** (-1.5 / 20));
 
   // the tail is cut where the next section's own tails take over; fade it so the cut can't click
   const f0 = Math.round((score.duration + score.tail - 1.5) * sr);
@@ -294,7 +325,102 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
     L[i] *= g;
     R[i] *= g;
   }
-  return { gain, measured };
+  return { gain: gain * makeup, measured };
+}
+
+/** The master's ceiling, -1.5 dBFS (peaks between the samples included: see limit()). */
+const CEILING = 10 ** (-1.5 / 20);
+
+// A rock record's buses (Mix.bus 'rock'), fitted to post-rock records: see out/research/proposals/sound-master.md.
+/**
+ * The drum bus (4:1, 3 to 7 dB on the hits), the crushed copy of it mixed `crush` under it (New York compression: it
+ * lifts the drums' tails about 2 dB against their hits) and the tape it is printed to (1 to 5 dB off the loudest
+ * hits), all in dB over the stem's own loudness: a soft build is compressed as much as a climax (the stem is leveled
+ * against the band after).
+ */
+export const DRUM_BUS: {
+  readonly bus: Readonly<Comp>;
+  readonly crushed: Readonly<Comp>;
+  readonly crush: number;
+  readonly tape: { readonly knee: number; readonly ceil: number };
+} = {
+  bus: { threshold: 2, rms: 0.002, ratio: 4, knee: 6, attack: 0.005, release: 0.12, slow: 0.6, hp: 0 },
+  crushed: { threshold: -6, rms: 0.0003, ratio: 20, knee: 6, attack: 0.0005, release: 0.08, slow: 0.3, hp: 0 },
+  crush: 1,
+  tape: { knee: 12, ceil: 16 },
+};
+/**
+ * The mix bus (3:1, auto release, the sidechain deaf below 40 Hz), its threshold in dB against the style's peak
+ * loudness: about 4 dB at a climax, dipping 1 to 2 dB more on the hits (the wall breathes with the kit), 1 dB in a
+ * build, nothing in the quiet parts.
+ */
+export const GLUE: Readonly<Comp> = {
+  threshold: -8,
+  rms: 0.005,
+  ratio: 3,
+  knee: 6,
+  attack: 0.01,
+  release: 0.12,
+  slow: 1.2,
+  hp: 40,
+};
+/** The tape the master is printed to: where it starts to bend and where it tops out, dBFS. */
+export const TAPE: { readonly knee: number; readonly ceil: number } = { knee: -3, ceil: 0 };
+
+/** A rock record's drum bus (see DRUM_BUS): the crushed copy and the bus are one gain curve on the same drums. */
+export function drumBus(s: Bus): void {
+  const { sr, n } = s;
+  const l = new Float32Array(n);
+  const r = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    l[i] = s.L[i] + s.ML[i];
+    r[i] = s.R[i] + s.MR[i];
+  }
+  const own = lufs(sr, l, r);
+  if (!Number.isFinite(own)) return;
+  const at = (c: Comp) => ({ ...c, threshold: own + c.threshold });
+  const g = compress(sr, l, r, at(DRUM_BUS.bus));
+  const h = compress(sr, l, r, at(DRUM_BUS.crushed));
+  for (const x of [s.L, s.R, s.ML, s.MR]) for (let i = 0; i < n; i++) x[i] *= g[i] + DRUM_BUS.crush * h[i];
+  // the kit plays on the main bus
+  const { knee, ceil } = DRUM_BUS.tape;
+  const sat = clipper(10 ** ((own + knee) / 20), 10 ** ((own + ceil) / 20));
+  oversampled(s.L, sat);
+  oversampled(s.R, sat);
+}
+
+/**
+ * A rock record's master: the band glued by the mix bus compressor, printed to tape (a soft clipper at twice the rate)
+ * and limited, made up to its target loudness through all three (measured again after the tape and the limiter, which
+ * take some of it). Returns the make-up gain.
+ */
+function rockMaster(b: Bus, mix: Mix, gain: number, target: number, end: number, stops: () => void): number {
+  const { sr, n, L, R } = b;
+  const warm = tape(mix.warmth);
+  for (let i = 0; i < n; i++) {
+    L[i] = warm(L[i] * gain);
+    R[i] = warm(R[i] * gain);
+  }
+  const g = compress(sr, L, R, { ...GLUE, threshold: mix.peak + GLUE.threshold });
+  const dl = L.map((v, i) => v * g[i]);
+  const dr = R.map((v, i) => v * g[i]);
+  const sat = clipper(10 ** (TAPE.knee / 20), 10 ** (TAPE.ceil / 20));
+  const print = (k: number) => {
+    oversampled(dl, sat, k, L);
+    oversampled(dr, sat, k, R);
+    stops();
+    limit(b, CEILING);
+    return k;
+  };
+  const before = lufs(sr, dl, dr, end);
+  if (!Number.isFinite(before)) return print(1);
+  let k = print(10 ** ((target - before) / 20));
+  for (let pass = 0; pass < 2; pass++) {
+    const short = target - lufs(sr, L, R, end);
+    if (!(short > 0.1)) break;
+    k = print(k * 10 ** (short / 20));
+  }
+  return k;
 }
 
 /** Early reflections [ms in a room of size 1, gain], a set for each ear: walls, floor and ceiling. */

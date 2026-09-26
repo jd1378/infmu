@@ -54,7 +54,7 @@ export interface StyleDef {
    * production); `warmth` how hard the console and tape are driven (0: clean); `width` the side-to-mid ratio the
    * bed is opened up to (stereo-recorded instruments in a room sit around 0.5 to 0.7, a piano recorded by a spaced
    * pair wider still); `amp` how an overdriven guitar's amp drives; `echo`, `hall` and `shimmer` the effects a guitar
-   * rig brings (see Mix).
+   * rig brings; `bus` how it is mixed and mastered (see Mix).
    */
   record: {
     size: number;
@@ -66,6 +66,7 @@ export interface StyleDef {
     echo?: 'tape';
     hall?: boolean;
     shimmer?: number;
+    bus?: 'rock';
   };
   /**
    * How much longer than the listener's chosen length its pieces run: post-rock needs the time for its long
@@ -371,8 +372,11 @@ export const STYLES: Record<StyleId, StyleDef> = {
       'intro:16 verse:16 build:8 chorus:16 break:16 build:16 drop:16 drop:8? outro:8',
       'intro:8 build:16 build:16 drop:16 break:8 build:8 drop:16 outro:4',
     ],
-    dynamics: [-10, 18],
-    balance: [-3, -1],
+    // mastered as the loud records are (out/research/proposals/sound-master.md): its climaxes 4 to 5 LU over the other
+    // styles' loudest, its quiet parts as quiet as ever
+    dynamics: [-7, 21.5],
+    // a bass guitar carries more of its loudness in the mids than a synth: set higher to weigh the same low end
+    balance: [-3, 3],
     chordSize: [[3, 2], [5, 2]],
     sus2: 0.35,
     barsPerChord: 2,
@@ -388,7 +392,17 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0.025, rit: 0.3 },
-    record: { size: 1.1, early: 0.6, hiss: -72, warmth: 0.4, width: 0.65, amp: 'fuzz', echo: 'tape', hall: true },
+    record: {
+      size: 1.1,
+      early: 0.6,
+      hiss: -72,
+      warmth: 0.4,
+      width: 0.65,
+      amp: 'fuzz',
+      echo: 'tape',
+      hall: true,
+      bus: 'rock',
+    },
     stretch: 1.6,
     grow: true,
   },

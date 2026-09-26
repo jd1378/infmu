@@ -102,7 +102,7 @@ export function haze(ctx: Ctx): void {
       }
       if (verse === 'own') sing(ctx, second, own, { center: 1, lo: -3, hi: 7, velocity: 0.85 });
       // stop-time: the band hits the downbeat together and leaves the rest of the bar empty
-      if (bars >= 8 && mrng.fork('stop-time').chance(0.4)) stopTime(ctx, 7);
+      if (bars >= 8 && mrng.fork('stop-time').chance(0.25)) stopTime(ctx, 7);
       break;
     case 'prechorus':
       for (let b = 0; b < bars; b++) {
@@ -113,7 +113,8 @@ export function haze(ctx: Ctx): void {
         }
         keys(b, chorusComp, 0.65);
       }
-      stopBefore(ctx, 1);
+      // the band stops before the chorus now and then, not every time
+      if (ctx.rng.fork('pre-stop').chance(0.35)) stopBefore(ctx, 1);
       break;
     case 'chorus':
       padChords(ctx, 'warm', { cut: () => [900, 1100], g: 0.3 });
@@ -220,7 +221,8 @@ export function garden(ctx: Ctx): void {
         guitar(b, 0.6);
         playGroove(ctx, g, b, band);
       }
-      stopBefore(ctx, 1);
+      // the band stops before the chorus now and then, not every time
+      if (ctx.rng.fork('pre-stop').chance(0.35)) stopBefore(ctx, 1);
       break;
     case 'chorus':
       padChords(ctx, 'warm', { cut: () => [1600, 2200], g: 0.5 });
@@ -286,7 +288,7 @@ export function nocturne(ctx: Ctx): void {
   };
   // a fermata: the music holds its breath on the last beat of a phrase, then goes on
   const breathe = () => {
-    if (bars >= 8 && mrng.fork('fermata', ctx.role).chance(0.45)) {
+    if (bars >= 8 && ctx.rng.fork('fermata').chance(0.12)) {
       ctx.hush(ctx.barAt(4) - breath(ctx, 1) * ctx.beat, ctx.barAt(4), true);
     }
   };
@@ -295,7 +297,7 @@ export function nocturne(ctx: Ctx): void {
     case 'intro':
       lh(0, bars, figure === 'rolling' ? 'broken' : figure, 0.55);
       introPreview(ctx, second, hook, { center: 4, lo: 0, hi: 11 });
-      if (mrng.fork('intro-rest').chance(0.5)) stopBefore(ctx, 1);
+      if (mrng.fork('intro-rest').chance(0.3)) stopBefore(ctx, 1);
       break;
     case 'verse':
       lh(0, bars, figure, 0.55);
@@ -326,7 +328,7 @@ export function nocturne(ctx: Ctx): void {
         ctx.push({ i: 'piano', t: ctx.barAt(b), d: ctx.bar * 1.8, n: slot.voicing, v: 0.45, strum: 0.05 });
       }
       play(ctx, 'piano', [{ t: ctx.barAt(half, 8), d: ctx.bar, n: ctx.tonicMid + 7, v: 0.6 }], 1, false);
-      stopBefore(ctx, 1);
+      if (ctx.rng.fork('break-stop').chance(0.5)) stopBefore(ctx, 1);
       break;
     case 'rest':
       break;

@@ -6,6 +6,7 @@ import type { Ev, KickKind, LeadKind, PadKind, RiseKind } from '../types.ts';
 import type { Bus, Stroke } from './bus.ts';
 import { freeverb, pan, saw, smooth, SVF, TAU, Wander } from './dsp.ts';
 import { Modes } from './modal.ts';
+import { bassGuitar } from './strings.ts';
 
 type E<K extends Ev['i']> = Extract<Ev, { i: K }>;
 const { exp, sin, cos, tanh, min, max, sqrt, round, pow, abs, log2, PI } = Math;
@@ -470,7 +471,9 @@ function acousticTom(b: Bus, e: E<'tom'>): void {
 
 // Sub sine + its octave + a PolyBLEP saw through a low-pass, driven hard. A phone can't play the fundamental,
 // so the overtones above 500 Hz and a 900 Hz growl are boosted: the ear rebuilds the line.
+// `pick` and `finger` are a bass guitar, a string model (see strings.ts).
 export function bass(b: Bus, e: E<'bass'>): void {
+  if (e.k === 'pick' || e.k === 'finger') return bassGuitar(b, e as E<'bass'> & { k: typeof e.k });
   const sr = b.sr;
   const dt = b.hz(e.n) / sr;
   let ps = 0;
