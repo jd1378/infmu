@@ -104,6 +104,8 @@ export interface Profile {
   avoid?: readonly number[];
   /** A reciting tune: its spare notes dwell on the note they're on rather than turning round it. */
   recite?: boolean;
+  /** A through-composed tune: a phrase is one line of new statements, not a theme restated (see through()). */
+  through?: boolean;
 }
 
 const LYRIC_SHAPES = [['arch', 4], ['leap', 2], ['wave', 1]] as const;
@@ -230,6 +232,23 @@ export function character(rng: Rng, p: Profile, mode: Key['mode']): Profile {
 }
 
 /**
+ * A through-composed phrase: a line that doesn't come back on itself. Each two-bar statement is a new idea drawn from
+ * the hook's seed (so a returning part sings the same line), reaching a little higher each time to one climax two
+ * thirds of the way through, then down to its close, with a half cadence at the middle.
+ */
+function through(m: Motif, slots: number): [Motif, number, ('open' | 'close')?][] {
+  const top = Math.max(1, Math.round(((slots - 1) * 2) / 3));
+  const lift = (k: number) =>
+    k <= top ? Math.round((3 * k) / top) : Math.round((3 * (slots - 1 - k)) / Math.max(1, slots - 1 - top));
+  return Array.from({ length: slots }, (_, k) => {
+    const ending = k === slots - 1 ? 'close' : k === Math.floor(slots / 2) - 1 ? 'open' : undefined;
+    const idea = k ? makeMotif(new Rng(hash32(m.seed, 10 + k)), m.profile, 'short', lift(k)) : m;
+    const motif = ending ? withTail(new Rng(hash32(m.seed, 30 + k)), idea, -1) : idea;
+    return [motif, Math.floor(lift(k) / 2), ending];
+  });
+}
+
+/**
  * A movement's tune (see Tune) in its style's idiom: a lament falls from a high note by step and sighs onto its chord
  * tones; a riff is a one-bar figure restated; a recitation stays near one note and repeats it; a fanfare calls in
  * fourths, fifths and octaves. A song, or no tune, is the style's own.
@@ -250,6 +269,8 @@ export function tuned(p: Profile, tune: Tune): Profile {
       return { ...p, climb: [1, 2], leaps: [1], repeat: 0.35, recite: true, shapes: [['wave', 2], ['arch', 1]] };
     case 'fanfare':
       return { ...p, climb: [5, 7], leaps: [3, 4, 7], repeat: 0.05, shapes: [['leap', 4], ['arch', 1]] };
+    case 'longLine':
+      return { ...p, through: true };
     default:
       return p;
   }
@@ -733,7 +754,9 @@ export function phrase(
   };
   const slots = Math.floor(bars / (2 * st));
   const tag: Slot[] = [[climax, 0], [close, 0, 'close']];
-  const plan: Slot[] = slots >= 6
+  const plan: Slot[] = m.profile.through && slots >= 3
+    ? through(m, slots)
+    : slots >= 6
     ? [...plans[form], ...tag]
     : slots >= 4
     ? plans[form]

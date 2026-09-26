@@ -36,10 +36,11 @@ export type Harmony = 'loop' | 'pedal' | 'lament' | 'vamp' | 'colour';
 /**
  * What a movement's tune is: `song`, a hook built round one climax (the style's own); `lament`, lines that fall from
  * a high note; `riff`, a figure restated as the chords move under it; `recitation`, a reciting tone and its
- * neighbours, the interest in the rhythm; `fanfare`, a call of fourths, fifths and octaves; `none`, no tune at all
+ * neighbours, the interest in the rhythm; `fanfare`, a call of fourths, fifths and octaves; `longLine`, one line
+ * through a whole part that never comes back on itself, rising to a single climax; `none`, no tune at all
  * (the band and its colour are the piece).
  */
-export type Tune = 'song' | 'lament' | 'riff' | 'recitation' | 'fanfare' | 'none';
+export type Tune = 'song' | 'lament' | 'riff' | 'recitation' | 'fanfare' | 'longLine' | 'none';
 
 /**
  * The one moment a movement is remembered by (see surprises.ts): `keyJump`, its last choruses up a major third;
@@ -47,6 +48,13 @@ export type Tune = 'song' | 'lament' | 'riff' | 'recitation' | 'fanfare' | 'none
  * the bed; `pause`, the band stopping for a bar in a chorus; `halfTime`, its peak's drums in half time.
  */
 export type Surprise = 'keyJump' | 'subito' | 'alone' | 'pause' | 'halfTime';
+
+/**
+ * A movement's one big idea (see compose/conceits.ts), when it has one: `ostinato`, a figure on fixed notes repeated
+ * unchanged while the harmony moves under it; `phase`, loops of unrelated lengths drifting against each other, so
+ * their meeting never repeats (Eno's Music for Airports).
+ */
+export type Conceit = 'none' | 'ostinato' | 'phase';
 
 /** The room a movement is recorded in: close and dry (under a second), a room, a hall, a cathedral (six seconds). */
 export type Space = 'close' | 'room' | 'hall' | 'cathedral';
@@ -155,6 +163,7 @@ export interface Movement {
   /** Whether its chords are held under it by a bed (pads), or left to the band to imply. */
   texture: 'bed' | 'bare';
   surprise: Surprise | null;
+  conceit: Conceit;
 }
 
 // ------------------------------------------------------------------ score events

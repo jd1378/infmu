@@ -22,7 +22,19 @@ import {
 } from './styles.ts';
 import { barSeconds, Clock } from './tempo.ts';
 import { type ChordSpec, type Key, MAJOR_MODES, mod } from './theory.ts';
-import type { Arc, Harmony, Movement, Role, SectionDef, Space, StyleId, Surprise, Transition, Tune } from './types.ts';
+import type {
+  Arc,
+  Conceit,
+  Harmony,
+  Movement,
+  Role,
+  SectionDef,
+  Space,
+  StyleId,
+  Surprise,
+  Transition,
+  Tune,
+} from './types.ts';
 
 const MODULATIONS: readonly (readonly [number, number])[] = [
   [7, 4],
@@ -294,6 +306,12 @@ export class Song {
       style.tunes.includes(t) && (t !== 'riff' || (meter === '4/4' && !MAJOR_MODES.has(mode)));
     const tunes = (Object.entries(feel.tunes) as [Tune, number][]).filter(([t]) => writes(t));
     const tune: Tune = tunes.length ? rng.fork('tune').weighted(tunes) : 'song';
+    // one big idea, now and then: a phase piece only when it isn't driving (its loops need room to be heard)
+    const ideas = style.conceits.filter((c) => c !== 'phase' || motion !== 'driving');
+    const conceit: Conceit = rng.fork('conceit').weighted<Conceit>([
+      ['none', 1.2],
+      ...ideas.map((c) => [c, 1] as const),
+    ]);
     // now and then the band implies the chords with no bed under them (never in a still piece: it would be empty)
     const texture = motion !== 'still' && rng.fork('texture').chance(style.bare) ? 'bare' : 'bed';
 
@@ -324,6 +342,7 @@ export class Song {
       space,
       texture,
       surprise: placed,
+      conceit,
     };
   }
 }

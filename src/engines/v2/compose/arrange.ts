@@ -5,6 +5,7 @@
 import type { StyleId } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { colours } from './colors.ts';
+import { conceit } from './conceits.ts';
 import { opening, transition } from './parts.ts';
 import { perform } from './perform.ts';
 import { finale, moment, treat, untuned } from './treatment.ts';
@@ -28,6 +29,7 @@ export function arrange(ctx: Ctx): void {
   opening(ctx);
   ARRANGERS[ctx.mv.style](ctx);
   colours(ctx);
+  conceit(ctx);
   untuned(ctx);
   treat(ctx);
   moment(ctx);

@@ -5,6 +5,7 @@ import { LOUD_OPENINGS } from '../../../src/engines/v2/arcs.ts';
 import { type Mood, moodModes, MOODS } from '../../../src/engines/v2/moods.ts';
 import { OPEN_ENDS, SPACES } from '../../../src/engines/v2/styles.ts';
 import { guitarist, PLAYERS } from '../../../src/engines/v2/compose/guitarist.ts';
+import { conceit } from '../../../src/engines/v2/compose/conceits.ts';
 import { perform } from '../../../src/engines/v2/compose/perform.ts';
 import { barSeconds, Song } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
@@ -1470,4 +1471,79 @@ Deno.test('a pause stops the band for the rest of a bar and it comes back; half 
     }
   }
   assert(pauses >= 3 && halves >= 3, `${pauses} pauses, ${halves} half-time parts`);
+});
+
+Deno.test("a long line doesn't come back on itself: its statements' rhythms are new where a song's return", () => {
+  const by = new Map<string, { again: number; statements: number }>();
+  for (let k = 0; k < 30; k++) {
+    const song = new Song(`lines-${k}`, ['nocturne', 'cathedral', 'drift', 'ember']);
+    for (let m = 0; m < 6; m++) {
+      const mv = song.movement(m);
+      if (mv.tune !== 'song' && mv.tune !== 'longLine') continue;
+      const r = by.get(mv.tune) ?? { again: 0, statements: 0 };
+      by.set(mv.tune, r);
+      mv.sections.forEach((sec, i) => {
+        if (!['verse', 'chorus', 'drop'].includes(sec.role) || sec.bars < 8) return;
+        const s = composeSection(song, mv.firstSection + i);
+        const tune = s.events.filter(isMelody);
+        if (!tune.length) return;
+        const voice = (e: Ev) => `${e.i}:${'k' in e ? e.k : ''}`;
+        const onsets = tune.filter((e) => voice(e) === voice(tune[0])).flatMap((e) =>
+          'ns' in e ? e.ns.map((n) => n.t) : [e.t]
+        ).sort((a, b) => a - b).filter((t, j, a) => !j || t - a[j - 1] > 0.25);
+        // each statement's first bar as its rhythm, placed against that bar's own lines (the tempo breathes)
+        const heard = new Set<string>();
+        for (let j = 0; j + 2 < s.bars.length; j += 2) {
+          const [t0, t1] = [s.bars[j], s.bars[j + 1]];
+          const bar = onsets.filter((t) => t >= t0 - 0.04 && t < t1 - 0.04).map((t) =>
+            Math.round(((t - t0) / (t1 - t0)) * 16)
+          );
+          if (bar.length < 2) continue;
+          r.statements++;
+          if (heard.has(bar.join())) r.again++;
+          heard.add(bar.join());
+        }
+      });
+    }
+  }
+  const share = (t: string) => by.get(t)!.again / by.get(t)!.statements;
+  assert(by.get('longLine')!.statements > 100, `only ${by.get('longLine')!.statements} long-line statements`);
+  assert(share('longLine') < share('song') / 2, `a long line restates ${share('longLine')}, a song ${share('song')}`);
+});
+
+Deno.test('a piece may be built on one idea: an ostinato on fixed notes, or loops drifting out of phase', () => {
+  const seen = { ostinato: 0, phase: 0, none: 0 };
+  for (let k = 0; k < 30; k++) {
+    const song = new Song(`ideas-${k}`);
+    for (let m = 0; m < 8; m++) {
+      const mv = song.movement(m);
+      seen[mv.conceit]++;
+      if (mv.conceit === 'none') continue;
+      assert(STYLES[mv.style].conceits.includes(mv.conceit), `${mv.style}: ${mv.conceit}`);
+      if (mv.conceit === 'phase') assert(mv.motion !== 'driving', `${mv.style} drives its loops`);
+      // the idea alone, in a verse or a chorus
+      const i = mv.sections.findIndex((x) => x.role === 'verse' || x.role === 'chorus');
+      if (i < 0) continue;
+      const ctx = new Ctx(song, mv.firstSection + i);
+      conceit(ctx);
+      const notes = ctx.events.map((e) => ({ t: e.t, n: Math.max(...['n' in e ? e.n : []].flat() as number[]) }));
+      assert(notes.length > 0, `${mv.style}: no ${mv.conceit}`);
+      const barOf = (t: number) => Math.floor(t / ctx.bar + 1e-6);
+      if (mv.conceit === 'ostinato') {
+        // the same notes in every bar, whatever the chords do under them
+        const bars = new Map<number, string>();
+        for (const x of notes) bars.set(barOf(x.t), `${bars.get(barOf(x.t)) ?? ''},${x.n}`);
+        assertEquals(new Set(bars.values()).size, 1, `${mv.style}: the figure changes`);
+      } else {
+        // a note comes back after its loop's length in beats, which no bar divides
+        const beats = notes.map((x) => x.t / ctx.beat);
+        const gaps = new Set<number>();
+        for (const a of notes) {
+          for (const b of notes) if (b.n === a.n && b.t > a.t) gaps.add(Math.round((b.t - a.t) / ctx.beat));
+        }
+        assert(beats.length > 0 && [...gaps].every((g) => [23, 29, 37].some((p) => g % p === 0)), `${[...gaps]}`);
+      }
+    }
+  }
+  assert(seen.ostinato > 10 && seen.phase > 5 && seen.none > seen.ostinato, JSON.stringify(seen));
 });

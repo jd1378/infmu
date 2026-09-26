@@ -1,6 +1,18 @@
 import type { Mood, Motion } from './moods.ts';
 import type { ModeName } from './theory.ts';
-import type { AmpTone, Arc, Harmony, Meter, Role, Space, StyleId, Surprise, Transition, Tune } from './types.ts';
+import type {
+  AmpTone,
+  Arc,
+  Conceit,
+  Harmony,
+  Meter,
+  Role,
+  Space,
+  StyleId,
+  Surprise,
+  Transition,
+  Tune,
+} from './types.ts';
 
 type Weighted<T> = readonly (readonly [T, number])[];
 type Range = readonly [number, number];
@@ -52,6 +64,8 @@ export interface StyleDef {
   bare: number;
   /** The surprises its pieces may have (see Surprise), as their moods fit. */
   surprises: readonly Surprise[];
+  /** The big ideas its pieces may be built on (see Conceit); none always may. */
+  conceits: readonly Conceit[];
   reverb: Range;
   delayBeats: readonly number[];
   delayFeedback: Range;
@@ -135,10 +149,11 @@ export const STYLES: Record<StyleId, StyleDef> = {
     moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'grief'],
     motions: ['still', 'flowing'],
     languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
-    tunes: ['song', 'lament', 'recitation', 'none'],
+    tunes: ['song', 'lament', 'recitation', 'none', 'longLine'],
     spaces: ['hall', 'cathedral'],
     bare: 0,
     surprises: ['alone', 'keyJump'],
+    conceits: ['phase'],
     reverb: [1.7, 2.1],
     delayBeats: [1.5, 0.75, 1],
     delayFeedback: [0.45, 0.6],
@@ -179,6 +194,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     spaces: ['close', 'room'],
     bare: 0.35,
     surprises: ['subito', 'alone', 'halfTime', 'keyJump'],
+    conceits: ['ostinato'],
     reverb: [1.1, 1.4],
     delayBeats: [0.75, 1.5],
     delayFeedback: [0.3, 0.45],
@@ -219,6 +235,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     spaces: ['room', 'hall'],
     bare: 0.3,
     surprises: ['keyJump', 'subito', 'pause', 'halfTime', 'alone'],
+    conceits: ['ostinato'],
     reverb: [1.4, 1.7],
     delayBeats: [0.75],
     delayFeedback: [0.4, 0.5],
@@ -259,6 +276,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     spaces: ['room', 'hall'],
     bare: 0,
     surprises: ['keyJump', 'subito', 'pause', 'halfTime'],
+    conceits: [],
     reverb: [1.5, 1.7],
     delayBeats: [0.75],
     delayFeedback: [0.38, 0.46],
@@ -295,10 +313,11 @@ export const STYLES: Record<StyleId, StyleDef> = {
     moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'power', 'unease', 'grief'],
     motions: ['still', 'flowing', 'driving'],
     languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
-    tunes: ['song', 'lament', 'fanfare'],
+    tunes: ['song', 'lament', 'fanfare', 'longLine'],
     spaces: ['hall', 'cathedral'],
     bare: 0,
     surprises: ['keyJump', 'subito', 'pause', 'halfTime', 'alone'],
+    conceits: ['ostinato', 'phase'],
     reverb: [1.7, 2],
     delayBeats: [0.75, 1.5],
     delayFeedback: [0.3, 0.4],
@@ -339,6 +358,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     spaces: ['close', 'room'],
     bare: 0,
     surprises: ['subito', 'pause', 'halfTime'],
+    conceits: [],
     reverb: [1.2, 1.5],
     delayBeats: [0.75, 0.5],
     delayFeedback: [0.35, 0.5],
@@ -379,6 +399,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     spaces: ['close', 'room', 'hall'],
     bare: 0.3,
     surprises: ['subito', 'alone', 'keyJump'],
+    conceits: ['ostinato', 'phase'],
     reverb: [1.2, 1.5],
     delayBeats: [0.75, 1],
     delayFeedback: [0.3, 0.45],
@@ -415,10 +436,11 @@ export const STYLES: Record<StyleId, StyleDef> = {
     moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'joy', 'grief'],
     motions: ['still', 'flowing', 'driving'],
     languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
-    tunes: ['song', 'lament', 'recitation'],
+    tunes: ['song', 'lament', 'recitation', 'longLine'],
     spaces: ['close', 'room', 'hall'],
     bare: 0,
     surprises: ['alone', 'keyJump', 'pause'],
+    conceits: ['ostinato', 'phase'],
     reverb: [1.5, 1.8],
     delayBeats: [1.5, 1],
     delayFeedback: [0.2, 0.3],
@@ -461,10 +483,11 @@ export const STYLES: Record<StyleId, StyleDef> = {
     moods: ['wonder', 'transcendence', 'tenderness', 'nostalgia', 'power', 'unease', 'grief'],
     motions: ['still', 'flowing'],
     languages: ['loop', 'pedal', 'lament', 'vamp', 'colour'],
-    tunes: ['song', 'lament', 'recitation', 'fanfare', 'none'],
+    tunes: ['song', 'lament', 'recitation', 'fanfare', 'none', 'longLine'],
     spaces: ['hall', 'cathedral'],
     bare: 0.25,
     surprises: ['keyJump', 'subito', 'pause', 'halfTime', 'alone'],
+    conceits: ['ostinato'],
     reverb: [1.8, 2.2],
     delayBeats: [0.75],
     delayFeedback: [0.55, 0.65],
