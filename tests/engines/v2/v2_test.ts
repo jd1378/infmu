@@ -7,7 +7,7 @@ import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
 import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
 import { snare } from '../../../src/engines/v2/synth/instruments.ts';
-import { melodyOffset, renderScore } from '../../../src/engines/v2/synth/render.ts';
+import { early, melodyOffset, renderScore, tape } from '../../../src/engines/v2/synth/render.ts';
 import { string } from '../../../src/engines/v2/synth/strings.ts';
 import { wind } from '../../../src/engines/v2/synth/voice.ts';
 import { Clock, tempoAt } from '../../../src/engines/v2/tempo.ts';
@@ -658,4 +658,66 @@ Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and
     return Math.abs(w - Math.round(w)) * bar < 0.06;
   });
   assert(mean(down.map((e) => e.v)) > mean(chords.map((e) => e.v)) * 1.15, 'the bass note is played like the rest');
+});
+
+Deno.test('a recording has a noise floor that never steps between sections; a digital production is silent', () => {
+  const sr = 16000;
+  const silent = (song: Song, i: number) => renderScore({ ...composeSection(song, i), events: [] }, sr);
+  const song = new Song('floor', ['nocturne']);
+  const mv = song.movement(0);
+  const [a, b] = [1, 2].map((k) => ({
+    s: composeSection(song, mv.firstSection + k),
+    r: silent(song, mv.firstSection + k),
+  }));
+  // the first section's tail overlaps the second's start, as the player plays them
+  const at = (t: number) => {
+    const i = Math.round(t * sr);
+    const j = Math.round((t - a.s.duration) * sr);
+    return (a.r.left[i] ?? 0) + (j >= 0 ? b.r.left[j] : 0);
+  };
+  const db = (from: number) => {
+    let e = 0;
+    for (let t = from; t < from + 0.1; t += 1 / sr) e += at(t) ** 2;
+    return 10 * Math.log10(e / (0.1 * sr));
+  };
+  const level = mv.mix.hiss!;
+  for (const t of [-0.6, -0.1, 0.05, 0.12, 0.6]) {
+    assertAlmostEquals(db(a.s.duration + t), level, 2, `a step in the noise floor at ${t} s from the boundary`);
+  }
+  const rise = new Song('floor', ['rise']);
+  const r = silent(rise, rise.movement(0).firstSection + 1);
+  assert(r.left.every((x) => x === 0), 'a digital production has a noise floor');
+});
+
+Deno.test('the room answers with early reflections, different on each side; the tape adds little', () => {
+  const sr = 22050;
+  const tone = new Song('room', ['nocturne']).movement(0).tone;
+  const b = new Bus(sr, 0.2, 1, tone);
+  b.REV[0] = 1;
+  early(b, { size: 1, early: 0.6 });
+  const onset = (x: Float32Array) => x.findIndex((v) => Math.abs(v) > 1e-4) / sr;
+  assert(onset(b.L) > 0.005 && onset(b.L) < 0.01 && onset(b.R) > 0.005 && onset(b.R) < 0.01);
+  assert(Math.abs(onset(b.L) - onset(b.R)) > 0.0005, 'both ears hear the first reflection at once');
+  let lr = 0;
+  let ll = 0;
+  let rr = 0;
+  for (let i = 0; i < b.n; i++) {
+    lr += b.L[i] * b.R[i];
+    ll += b.L[i] ** 2;
+    rr += b.R[i] ** 2;
+  }
+  assert(Math.abs(lr / Math.sqrt(ll * rr)) < 0.5, 'both sides hear the same reflections');
+  const later = new Bus(sr, 0.2, 1, tone);
+  later.REV[0] = 1;
+  early(later, { size: 1.6, early: 0.6 });
+  assert(onset(later.L) > onset(b.L) * 1.4, 'a bigger room answers no later');
+  // a full-scale sine through the tape at full warmth: its harmonics stay under 3%
+  const warm = tape(1);
+  const N = 4800;
+  const x = Array.from({ length: N }, (_, i) => Math.sin((2 * Math.PI * i) / 48));
+  const y = x.map(warm);
+  const fund = (2 / N) * y.reduce((s, v, i) => s + v * x[i], 0);
+  const mean = y.reduce((s, v) => s + v, 0) / N;
+  const rest = Math.sqrt(y.reduce((s, v, i) => s + (v - mean - fund * x[i]) ** 2, 0) / N);
+  assert(rest / (fund / Math.SQRT2) < 0.03, `the tape distorts ${((100 * rest) / (fund / Math.SQRT2)).toFixed(1)}%`);
 });

@@ -4,7 +4,7 @@
 
 import { type Ev, isMelody, type Mix, type Score } from '../types.ts';
 import { Bus } from './bus.ts';
-import { freeverb, lufs, SVF, TAU } from './dsp.ts';
+import { freeverb, lufs, Noise, SVF, TAU } from './dsp.ts';
 import * as I from './instruments.ts';
 import { bell, mallet, perc, piano } from './modal.ts';
 import { string } from './strings.ts';
@@ -86,6 +86,7 @@ export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendere
     (own) => against(dryLufs(b), melodyOffset(score.section.energy), 0.7, 4)(own),
   );
   const { gain, measured } = master(b, score);
+  if (mix.hiss !== null) air(b, score, mix.hiss);
   return { left: b.L, right: b.R, sampleRate, lufs: measured, gain };
 }
 
@@ -239,6 +240,7 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
     rh.run(rl.run(REV[i]));
     REV[i] = rh.hp;
   }
+  early(b, mix);
   freeverb(sr, REV, L, R, mix.room, mix.reverb, Math.round(0.045 * sr), 0.35);
   for (let i = 0; i < n; i++) {
     if (hush[i] < 1) {
@@ -269,9 +271,10 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
   const ca = Math.exp(-1 / (0.01 * sr));
   const cr = Math.exp(-1 / (0.15 * sr));
   let env = 0;
+  const warm = tape(mix.warmth);
   for (let i = 0; i < n; i++) {
-    const l = L[i] * gain;
-    const r = R[i] * gain;
+    const l = warm(L[i] * gain);
+    const r = warm(R[i] * gain);
     const pk = Math.max(Math.abs(l), Math.abs(r));
     env = pk > env ? ca * env + (1 - ca) * pk : cr * env + (1 - cr) * pk;
     const over = 20 * Math.log10(env + 1e-9) + 10;
@@ -292,6 +295,94 @@ function master(b: Bus, score: Score): { gain: number; measured: number } {
   }
   return { gain, measured };
 }
+
+/** Early reflections [ms in a room of size 1, gain], a set for each ear: walls, floor and ceiling. */
+const EARLY: readonly (readonly (readonly [number, number])[])[] = [
+  [[6.3, 0.62], [11.9, 0.48], [16.1, 0.41], [22.7, 0.33], [28.4, 0.27], [35.9, 0.21], [43.3, 0.16]],
+  [[7.4, 0.58], [10.8, 0.5], [18.3, 0.39], [21.1, 0.34], [30.6, 0.26], [33.7, 0.22], [41.2, 0.17]],
+];
+/** Reflections at `early` 1 carry about as much energy as the reverb's tail. */
+const EARLY_GAIN = 0.65;
+
+/**
+ * The room answering: in the first 45 ms, before the reverb's tail builds, the walls, floor and ceiling send
+ * each sound back, a little darker. They come from the reverb send, so what sits further back in the mix has
+ * more of them; each ear hears its own set, which makes the room wide (and keeps the mono sum clean enough at
+ * this level).
+ */
+export function early(b: Bus, mix: Pick<Mix, 'size' | 'early'>): void {
+  const { sr, n, REV } = b;
+  EARLY.forEach((taps, side) => {
+    const out = side ? b.R : b.L;
+    const sum = new Float32Array(n);
+    for (const [ms, a] of taps) {
+      const d = Math.round((ms * mix.size * sr) / 1000);
+      const g = a * mix.early * EARLY_GAIN;
+      for (let i = d; i < n; i++) sum[i] += REV[i - d] * g;
+    }
+    const lp = new SVF(sr, 6000, 0.6);
+    for (let i = 0; i < n; i++) out[i] += lp.run(sum[i]);
+  });
+}
+
+/**
+ * A console and tape driven gently: a soft cubic that rounds the loudest peaks by a fraction of a dB and a touch
+ * of asymmetry for the even harmonics tape adds. At `warmth` 1 a sine at full scale has about 2.7% distortion;
+ * at a mix's average level it is far below hearing.
+ */
+export function tape(warmth: number): (x: number) => number {
+  if (!warmth) return (x) => x;
+  const a = 0.08 * warmth;
+  const c = 0.03 * warmth;
+  return (x) => x + c * x * x - a * x * x * x;
+}
+
+/**
+ * The noise floor of a recording: faint pink-ish hiss and room tone under everything, on both channels
+ * independently, at `level` dBFS. It runs through a movement without a seam: each section crossfades (equal
+ * power, the noises being unrelated) into the next where their tails overlap, fades in with a movement's first
+ * section and out after its last, and stops dead with a tape stop.
+ */
+function air(b: Bus, score: Score, level: number): void {
+  const { sr, n } = b;
+  const mv = score.movement;
+  if (score.section.role === 'rest') return;
+  let lastSounding = mv.sections.length - 1;
+  if (mv.sections[lastSounding].role === 'rest') lastSounding--;
+  const first = score.local === 0;
+  const last = score.local === lastSounding;
+  const X = 0.25;
+  const fadeIn = first ? 1 : X;
+  const stop = score.events.find((e) => e.i === 'stop');
+  const end = stop ? stop.t + stop.d : last ? score.duration + Math.min(3, score.tail - 1.5) : score.duration + X;
+  const fadeOut = stop ? 0.02 : last ? 1.5 : X;
+  const g = 10 ** (level / 20) * AIR_NORM;
+  const len = Math.min(n, Math.round(end * sr));
+  for (const [ch, salt] of [[b.L, 0x61697231], [b.R, 0x61697232]] as const) {
+    const noise = new Noise((score.noiseSeed ^ salt) >>> 0);
+    const hp = new SVF(sr, 40, 0.7);
+    const lp = new SVF(sr, 14000, 0.7);
+    // Kellet's economy pink filter
+    let p0 = 0;
+    let p1 = 0;
+    let p2 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = noise.next();
+      p0 = 0.99765 * p0 + w * 0.099046;
+      p1 = 0.963 * p1 + w * 0.2965164;
+      p2 = 0.57 * p2 + w * 1.0526913;
+      const pink = p0 + p1 + p2 + w * 0.1848;
+      hp.run(lp.run(0.5 * pink + 0.5 * w));
+      const t = i / sr;
+      let f = g;
+      if (t < fadeIn) f *= Math.sin((Math.PI / 2) * (t / fadeIn));
+      if (t > end - fadeOut) f *= Math.cos((Math.PI / 2) * Math.min(1, (t - (end - fadeOut)) / fadeOut));
+      ch[i] += hp.hp * f;
+    }
+  }
+}
+/** Scales the shaped noise above to unit rms. */
+const AIR_NORM = 1.18;
 
 /**
  * The guitar amp: a high-pass (no flub) and a pre-emphasis so the drive bites in the mids, then hard, slightly

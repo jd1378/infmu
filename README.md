@@ -38,9 +38,11 @@ files. The same seed plays the same endless song for anyone, so a song is shared
 - **Nine styles, one band each:** ambient, lo-fi, synthwave, trance, cinematic, acid house, organic downtempo, piano and
   post-rock. A movement keeps its style, its lead voice and one signature texture from start to end; the band grows
   rather than changes. Variety comes from movement to movement.
-- **Mixed by measurement.** Each section is rendered in stems (the bed of chords and textures, drums, bass, melody):
-  drums and bass sit where the style wants them against the bed, the melody rides on top, the bed is widened
-  (mono-compatibly), and the section is leveled to the loudness its place in the arc calls for.
+- **Mixed by measurement, heard as a recording.** Each section is rendered in stems (the bed of chords and textures,
+  drums, bass, melody): drums and bass sit where the style wants them against the bed, the melody rides on top, the bed
+  is widened (mono-compatibly), and the section is leveled to the loudness its place in the arc calls for. Each style
+  plays in a room of its own (early reflections from its walls, a small room for lo-fi, a hall for cinematic), the band
+  styles have the faint noise floor of a recording, and the analog ones a touch of tape warmth.
 - **Instruments, all synthesized:** drums and hand percussion (congas, bongos, cowbell, ride, crash, snaps), supersaw
   pads, strings, a pipe organ, a grand and an electric piano, acoustic and electric guitars (clean, or overdriven
   through an amp model), harp, marimba, vibraphone, kalimba, glockenspiel and bells, flute, saxophone, brass, a hummed

@@ -152,6 +152,7 @@ export class Song {
       range: style.dynamics[1],
       drums: style.balance[0],
       bass: style.balance[1],
+      ...style.record,
     };
 
     return {

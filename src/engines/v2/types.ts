@@ -49,6 +49,10 @@ export interface Mix {
   range: number; // LU from its quietest part to its loudest
   drums: number; // LU of the drums against the bed (chords and textures)
   bass: number; // LU of the bass against the bed
+  size: number; // the room's early reflections: time scale (1 = a mid-sized room)
+  early: number; // their level against the reverb send
+  hiss: number | null; // noise floor, dBFS; null for none
+  warmth: number; // console and tape drive, 0 = clean
 }
 
 export interface Movement {
