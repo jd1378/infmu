@@ -188,16 +188,44 @@ export class Song {
     // a piece rarely ends the way the one before it did
     let transition = rng.fork('transition').weighted(style.transitions);
     if (prev && transition === prev.transition) transition = rng.fork('transition', 1).weighted(style.transitions);
+    // what the piece is made of, each as the mood leans (see moods.ts), within one budget of stillness: a piece may be
+    // extreme on one or two axes, never on all of them (still, a vamp, no tune and an ostinato is wallpaper). The
+    // harmonic language: one the style speaks and the mode has (see Harmony)
+    let stillness = STILL.motion[motion] ?? 0;
+    const fitsStill = (cost = 0) => stillness + cost <= STILLNESS;
+    const speaks = (l: Harmony) =>
+      style.languages.includes(l) && (l !== 'lament' || !!LAMENTS[mode]) && (l !== 'colour' || !!COLOURS[mode]) &&
+      fitsStill(STILL.harmony[l]);
+    const langs = (Object.entries(feel.languages) as [Harmony, number][]).filter(([l]) => speaks(l));
+    const harmony: Harmony = langs.length ? rng.fork('language').weighted(langs) : 'loop';
+    stillness += STILL.harmony[harmony] ?? 0;
+    // the tune: one the style writes; a riff only in four and in a minor mode (a figure restated in a major key, or
+    // in three, is a carousel)
+    const writes = (t: Tune) =>
+      style.tunes.includes(t) && (t !== 'riff' || (meter === '4/4' && !MAJOR_MODES.has(mode))) &&
+      fitsStill(STILL.tune[t]);
+    const tunes = (Object.entries(feel.tunes) as [Tune, number][]).filter(([t]) => writes(t));
+    const tune: Tune = tunes.length ? rng.fork('tune').weighted(tunes) : 'song';
+    stillness += STILL.tune[tune] ?? 0;
+    // one big idea, now and then: a phase piece only when it isn't driving (its loops need room to be heard)
+    const ideas = style.conceits.filter((c) => (c !== 'phase' || motion !== 'driving') && fitsStill(STILL.conceit[c]));
+    const conceit: Conceit = rng.fork('conceit').weighted<Conceit>([
+      ['none', 1.2],
+      ...ideas.map((c) => [c, 1] as const),
+    ]);
+    stillness += STILL.conceit[conceit] ?? 0;
     // the story the piece tells: not the one the piece before told, and a loud opening only after a piece that
     // didn't fade away (never the very first)
     const arcs = style.arcs.filter((a) =>
       a !== prev?.arc && (!LOUD_OPENINGS.has(a) || (prev !== null && prev.transition !== 'fade')) &&
-      (!steady || STEADY_ARCS.has(a))
+      (!steady || STEADY_ARCS.has(a)) && fitsStill(STILL.arc[a])
     );
     // the moment it is remembered by, or none: one its style and mood allow, not the kind either piece before had
     const lately = this.movements.slice(Math.max(0, m - 2), m).map((x) => x.surprise);
     const fits = (k: Surprise) =>
-      style.surprises.includes(k) && !lately.includes(k) && (k !== 'halfTime' || meter === '4/4');
+      style.surprises.includes(k) && !lately.includes(k) && (k !== 'halfTime' || meter === '4/4') &&
+      // (a part left to the tune needs a tune)
+      (k !== 'alone' || tune !== 'none');
     const kinds = (Object.entries(feel.surprises) as [Surprise, number][]).filter(([k]) => fits(k));
     // (drawn, then the others it allows in turn, for a form with no room for it)
     const first = rng.fork('surprise').weighted<Surprise | null>([[null, 0.5], ...kinds]);
@@ -254,13 +282,9 @@ export class Song {
     const bridgeSrc = others.length ? h.pick(others) : alt;
     const bridge = [...bridgeSrc.slice(2), ...bridgeSrc.slice(0, 2)];
 
-    // the harmonic language, as the mood leans (see Harmony): one the style speaks and the mode has. A lament or a
-    // vamp is what the verses play, and often the choruses; a colour chord takes a place in both their loops; a pedal
-    // is the bass's (see sectionChords). The bridge still goes elsewhere.
-    const speaks = (l: Harmony) =>
-      style.languages.includes(l) && (l !== 'lament' || !!LAMENTS[mode]) && (l !== 'colour' || !!COLOURS[mode]);
-    const langs = (Object.entries(feel.languages) as [Harmony, number][]).filter(([l]) => speaks(l));
-    const harmony: Harmony = langs.length ? rng.fork('language').weighted(langs) : 'loop';
+    // the harmonic language (drawn above) rewrites the parts' progressions: a lament or a vamp is what the verses
+    // play, and often the choruses; a colour chord takes a place in both their loops; a pedal is the bass's (see
+    // sectionChords). The bridge still goes elsewhere.
     const lang = h.fork(harmony);
     const fitted = (ps: readonly ProgChord[][]) => {
       const f = ps.filter((p) => barsPerChord === 1 || p.length === 4);
@@ -313,18 +337,6 @@ export class Song {
       ...style.record,
       early: style.record.early * room.early,
     };
-    // the tune, as the mood leans: one the style writes; a riff only in four and in a minor mode (a figure restated
-    // in a major key, or in three, is a carousel)
-    const writes = (t: Tune) =>
-      style.tunes.includes(t) && (t !== 'riff' || (meter === '4/4' && !MAJOR_MODES.has(mode)));
-    const tunes = (Object.entries(feel.tunes) as [Tune, number][]).filter(([t]) => writes(t));
-    const tune: Tune = tunes.length ? rng.fork('tune').weighted(tunes) : 'song';
-    // one big idea, now and then: a phase piece only when it isn't driving (its loops need room to be heard)
-    const ideas = style.conceits.filter((c) => c !== 'phase' || motion !== 'driving');
-    const conceit: Conceit = rng.fork('conceit').weighted<Conceit>([
-      ['none', 1.2],
-      ...ideas.map((c) => [c, 1] as const),
-    ]);
     // now and then the band implies the chords with no bed under them (never in a still piece: it would be empty)
     const texture = motion !== 'still' && rng.fork('texture').chance(style.bare) ? 'bare' : 'bed';
 
@@ -369,6 +381,30 @@ export const CHARACTERS = ['adventurous', 'steady'] as const;
 export type Character = typeof CHARACTERS[number];
 const CALM_MOODS: ReadonlySet<Mood> = new Set(['wonder', 'transcendence', 'tenderness', 'nostalgia', 'peace', 'joy']);
 const STEADY_ARCS: ReadonlySet<Arc> = new Set(['climb', 'early', 'plateau']);
+
+/**
+ * How much each choice holds a piece still, and how much stillness one piece may have. Still motion or a two-chord
+ * vamp is a strong choice; no tune is stronger; a pedal, a recitation, an ostinato, loops or a plateau are milder.
+ */
+const STILL: {
+  motion: Partial<Record<Motion, number>>;
+  harmony: Partial<Record<Harmony, number>>;
+  tune: Partial<Record<Tune, number>>;
+  conceit: Partial<Record<Conceit, number>>;
+  arc: Partial<Record<Arc, number>>;
+} = {
+  motion: { still: 1 },
+  harmony: { vamp: 1, pedal: 0.5 },
+  tune: { none: 1.5, recitation: 0.5 },
+  conceit: { ostinato: 0.5, phase: 0.5 },
+  arc: { plateau: 0.5 },
+};
+const STILLNESS = 2;
+
+/** How still a planned movement is (see STILL): never more than STILLNESS. */
+export const stillnessOf = (mv: Movement) =>
+  (STILL.motion[mv.motion] ?? 0) + (STILL.harmony[mv.harmony] ?? 0) + (STILL.tune[mv.tune] ?? 0) +
+  (STILL.conceit[mv.conceit] ?? 0) + (STILL.arc[mv.arc] ?? 0);
 
 /** How many movements back the journey remembers, so it doesn't repeat itself. */
 const RECENT = 4;

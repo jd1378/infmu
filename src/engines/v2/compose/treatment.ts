@@ -6,6 +6,8 @@ import { type Ev, isMelody } from '../types.ts';
 import type { Ctx } from './context.ts';
 import { crash } from './parts.ts';
 
+/** The drums alone: all a hushed section of a style that is all rhythm section (acid house) loses. */
+const DRUMS: ReadonlySet<Ev['i']> = new Set(['kick', 'snare', 'tom', 'hat', 'perc']);
 /** The rhythm section, and what drives a section forward: out of a hushed one. */
 const RHYTHM: ReadonlySet<Ev['i']> = new Set([
   'kick',
@@ -14,22 +16,31 @@ const RHYTHM: ReadonlySet<Ev['i']> = new Set([
   'hat',
   'perc',
   'bass',
-  'acid',
   'impact',
   'rise',
   'sweep',
 ]);
+/** Events that make no sound of their own. */
+const SILENT: ReadonlySet<Ev['i']> = new Set(['vinyl', 'breath', 'gap', 'stop']);
 /** What a bare section keeps under its tune: the sustained bed, the record's surface, its silences. */
 const BED: ReadonlySet<Ev['i']> = new Set(['pad', 'organ', 'drone', 'choir', 'vinyl', 'breath', 'gap']);
 
-/** A hushed section plays without its rhythm section and its overdriven wall; a bare one only its tune over the bed. */
+/**
+ * A hushed section plays without its rhythm section and its overdriven wall; a bare one only its tunes over the bed
+ * (chords swelled in on a guitar are a bed too). A section is never left silent: one with nothing to keep bare (no
+ * tune, no bed) is played hushed instead, and one with nothing to keep hushed loses only its drums.
+ */
 export function treat(ctx: Ctx): void {
   const how = ctx.sec.treatment;
   if (!how) return;
-  const keep = how === 'hushed'
-    ? (e: Ev) => !RHYTHM.has(e.i) && !(e.i === 'string' && e.k === 'overdrive')
-    : (e: Ev) => isMelody(e) || BED.has(e.i);
-  const kept = ctx.events.filter(keep);
+  const hushed = (e: Ev) => !RHYTHM.has(e.i) && !(e.i === 'string' && e.k === 'overdrive');
+  // (a counter-line is a tune too: a break often sings its own)
+  const bare = (e: Ev) =>
+    ('lead' in e && e.lead !== undefined) || BED.has(e.i) || (e.i === 'string' && e.swell !== undefined);
+  const sounds = (e: Ev) => !SILENT.has(e.i);
+  let kept = ctx.events.filter(how === 'hushed' ? hushed : bare);
+  if (!kept.some(sounds)) kept = ctx.events.filter(hushed);
+  if (!kept.some(sounds)) kept = ctx.events.filter((e) => !DRUMS.has(e.i));
   ctx.events.length = 0;
   ctx.events.push(...kept);
 }

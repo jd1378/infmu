@@ -6,8 +6,9 @@ import { type Mood, moodModes, MOODS } from '../../../src/engines/v2/moods.ts';
 import { OPEN_ENDS, SPACES } from '../../../src/engines/v2/styles.ts';
 import { guitarist, PLAYERS } from '../../../src/engines/v2/compose/guitarist.ts';
 import { conceit } from '../../../src/engines/v2/compose/conceits.ts';
+import { treat } from '../../../src/engines/v2/compose/treatment.ts';
 import { perform } from '../../../src/engines/v2/compose/perform.ts';
-import { barSeconds, Song } from '../../../src/engines/v2/plan.ts';
+import { barSeconds, Song, stillnessOf } from '../../../src/engines/v2/plan.ts';
 import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
 import { CATHEDRAL_TIMES, DRIFT_TIMES, EMBER_TIMES, GARDEN_TIMES } from '../../../src/engines/v2/compose/grooves.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
@@ -309,7 +310,11 @@ Deno.test('a hushed section plays without its rhythm section, a bare one only it
           // (and the hand-over into the next piece)
           const handOver = (e: Ev) => e.i === 'rise' && e.k === 'swell';
           assert(
-            score.events.every((e) => isMelody(e) || bed.has(e.i) || handOver(e)),
+            // (a counter-line is a tune too, and chords swelled in on a guitar a bed)
+            score.events.every((e) =>
+              ('lead' in e && e.lead !== undefined) || bed.has(e.i) || (e.i === 'string' && e.swell !== undefined) ||
+              handOver(e)
+            ),
             `${mv.style}: a bare ${sec.role}`,
           );
         }
@@ -1186,14 +1191,16 @@ Deno.test('a still piece accompanies on the beats, a flowing one in eighths; onl
           const x = ((t - s.bars[b]) / (s.bars[b + 1] - s.bars[b])) * spb;
           return Math.abs(x - Math.round(x)) <= 0.4 ? { bar: b, step: Math.round(x) % spb } : null;
         };
+        // (a step busier where the piece is at its fullest)
+        const motion = mv.sections[i].energy < 0.75 ? mv.motion : mv.motion === 'still' ? 'flowing' : 'driving';
         for (const e of s.events) {
           const accompanies = ['pluck', 'mallet', 'piano', 'bass', 'string'].includes(e.i) && !('lead' in e) &&
             !(e.i === 'string' && e.swell !== undefined);
-          if (mv.motion === 'driving' || !accompanies) continue;
+          if (motion === 'driving' || !accompanies) continue;
           const at = stepOf(e.t);
           if (!at) continue;
           checked++;
-          if (mv.motion === 'still' ? at.step % beat : at.step % 2) off++;
+          if (motion === 'still' ? at.step % beat : at.step % 2) off++;
         }
         if (mv.mood === 'joy') return;
         // no oom-pah: on the beats of a bar, never the root on one and its fifth on another
@@ -1632,4 +1639,120 @@ Deno.test('some pieces are in five or seven: bars of 20 or 14 sixteenths, drums 
       assert(kicks > 20 && onGroups / kicks > 0.8, `${style}: ${onGroups} of ${kicks} kicks on groups`);
     }
   }
+});
+
+Deno.test('no part of a piece is silent: every four bars of every section sound', () => {
+  const silent = new Set(['gap', 'vinyl', 'stop', 'breath']);
+  let sections = 0;
+  for (const style of STYLE_IDS) {
+    for (let k = 0; k < 6; k++) {
+      const song = new Song(`sounding-${style}-${k}`, [style], 'short');
+      for (let m = 0; m < 3; m++) {
+        const mv = song.movement(m);
+        mv.sections.forEach((sec, i) => {
+          if (sec.role === 'rest') return;
+          sections++;
+          const s = composeSection(song, mv.firstSection + i);
+          const sound = s.events.filter((e) => !silent.has(e.i));
+          for (let b = 0; b + 4 < s.bars.length; b += 4) {
+            const [t0, t1] = [s.bars[b], s.bars[b + 4]];
+            // (a line of notes, a 303's or a wind's, sounds where its notes do)
+            const heard = sound.some((e) =>
+              'ns' in e
+                ? e.ns.some((n) => n.t < t1 && n.t + n.d > t0)
+                : e.t < t1 && e.t + ('d' in e && typeof e.d === 'number' ? e.d : 2) > t0
+            );
+            assert(
+              heard,
+              `${style} ${mv.mood} ${mv.tune} ${sec.role} ${sec.treatment ?? ''}: bars ${b} to ${b + 4} silent`,
+            );
+          }
+        });
+      }
+    }
+  }
+  assert(sections > 300);
+});
+
+Deno.test('a piece is extreme on one or two axes, never on all: still, a vamp, no tune and an ostinato never meet', () => {
+  let still = 0;
+  for (let k = 0; k < 60; k++) {
+    const song = new Song(`stillness-${k}`);
+    for (let m = 0; m < 12; m++) {
+      const mv = song.movement(m);
+      assert(stillnessOf(mv) <= 2, `${mv.style}: ${mv.motion} ${mv.harmony} ${mv.tune} ${mv.conceit} ${mv.arc}`);
+      if (mv.motion === 'still' && mv.harmony === 'vamp') still++;
+      if (mv.tune === 'none') assert(mv.motion !== 'still' && mv.harmony !== 'vamp', `${mv.style}: nothing moves`);
+    }
+  }
+  assert(still > 0, 'a still vamp never happens at all');
+  // the piece that was wallpaper: still, a vamp, and now a tune over it
+  const mv = new Song('dusty-wild-aurora', ['ember'], 'short').movement(0);
+  assert(mv.tune !== 'none' && mv.conceit === 'none', `${mv.tune} ${mv.conceit}`);
+});
+
+Deno.test("a post-rock build grows a layer at a time: nothing floods in at a section's line", () => {
+  let lines = 0;
+  for (let k = 0; k < 30; k++) {
+    const song = new Song(`growing-${k}`, ['ember'], 'short');
+    for (let m = 0; m < 3; m++) {
+      const mv = song.movement(m);
+      mv.sections.forEach((sec, i) => {
+        if (sec.role !== 'build' || mv.sections[i + 1]?.role !== 'build') return;
+        const [a, b] = [composeSection(song, mv.firstSection + i), composeSection(song, mv.firstSection + i + 1)];
+        // what sounds in the last two bars of one and the first two of the next (a held chord sounds all through)
+        const part = (e: Ev) => `${e.i}:${'k' in e ? e.k : ''}`;
+        const len = (e: Ev) => ('d' in e && typeof e.d === 'number' ? e.d : 0.3);
+        const [a0, a1] = [a.bars[a.bars.length - 3], a.duration];
+        const before = new Set(a.events.filter((e) => e.t < a1 && e.t + len(e) > a0).map(part));
+        const after = new Set(b.events.filter((e) => e.t < b.bars[2]).map(part));
+        const entering = [...after].filter((p) => !before.has(p) && !p.startsWith('perc') && !p.startsWith('tom'));
+        lines++;
+        assert(entering.length <= 1, `${mv.mood} ${mv.motion}: ${entering} enter together`);
+      });
+    }
+  }
+  assert(lines > 10, `only ${lines} lines between builds`);
+});
+
+Deno.test('a bare or hushed section with nothing of its own to keep is never left silent', () => {
+  const find = (how: 'bare' | 'hushed') => {
+    for (let k = 0; k < 200; k++) {
+      const song = new Song(`treated-${k}`);
+      for (let m = 0; m < 6; m++) {
+        const mv = song.movement(m);
+        const i = mv.sections.findIndex((x) => x.treatment === how);
+        if (i >= 0) return new Ctx(song, mv.firstSection + i);
+      }
+    }
+    throw new Error(`no ${how} section`);
+  };
+  // a bare part with no tune and no bed (a guitar's picking alone) keeps the picking, hushed
+  const bare = find('bare');
+  bare.events.length = 0;
+  bare.push({ i: 'string', t: 0, n: 64, v: 0.5, k: 'clean' });
+  bare.push({ i: 'kick', t: 0, v: 0.8, k: 'acoustic', sc: 0, n: 36 });
+  treat(bare);
+  assertEquals(bare.events.map((e) => e.i), ['string']);
+  // a hushed part of nothing but a 303 and drums keeps the 303
+  const hushed = find('hushed');
+  hushed.events.length = 0;
+  hushed.push({
+    i: 'acid',
+    t: 0,
+    ns: [{ t: 0, d: 0.2, n: 45, v: 0.8, accent: false, slide: false }],
+    cut: [300, 2000],
+    res: 0.6,
+    env: 0.5,
+  });
+  hushed.push({ i: 'hat', t: 0, v: 0.5, k: 'closed' });
+  treat(hushed);
+  assertEquals(hushed.events.map((e) => e.i), ['acid']);
+  // and a bare part keeps the chords a guitar swells in, as its bed
+  const swelled = find('bare');
+  swelled.events.length = 0;
+  swelled.push({ i: 'string', t: 0, n: 64, v: 0.5, k: 'clean', d: 2, swell: 0.8 });
+  swelled.push({ i: 'string', t: 0, n: 52, v: 0.5, k: 'overdrive', d: 2 });
+  treat(swelled);
+  assertEquals(swelled.events.length, 1);
 });

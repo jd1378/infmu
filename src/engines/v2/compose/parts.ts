@@ -1,7 +1,7 @@
 // Part writers shared by the styles: drum grids, basslines, chord beds, arpeggios and transition effects.
 // Each writes events into the section's context; the styles decide which ones play when.
 
-import { bounces } from '../moods.ts';
+import { bounces, type Motion } from '../moods.ts';
 import { MAJOR_MODES, mod, voiceLead } from '../theory.ts';
 import type { Rng } from '../rng.ts';
 import {
@@ -121,16 +121,17 @@ export function roll(
 }
 
 /**
- * A build's roll across its whole run of sections: beats, then eighths, then sixteenths, velocity rising
- * throughout; each section writes the hits that fall inside it.
+ * A build's roll across its run of sections, from `from` of the way through it (0: all of it): beats, then eighths,
+ * then sixteenths, velocity rising throughout; each section writes the hits that fall inside it, so the roll enters
+ * where the run is, not where a section starts.
  */
-export function runRoll(ctx: Ctx, v0: number, v1: number, k: SnareKind = 'roll'): void {
-  const T = ctx.runBars;
+export function runRoll(ctx: Ctx, v0: number, v1: number, k: SnareKind = 'roll', from = 0): void {
+  const T = ctx.runBars * (1 - from);
   // hits a bar at each stage, in the movement's time: its beats, then eighths, then 16ths
   const [a, b, c] = [BEATS[ctx.mv.meter].length, ctx.spb / 2, ctx.spb];
   const plan: [number, number][] = [[T / 2, (T / 2) * a], [T / 4, (T / 4) * b], [T / 4, (T / 4) * c]];
   const hits: number[] = [];
-  let start = 0;
+  let start = ctx.runBars * from;
   for (const [bars, n] of plan) {
     for (let i = 0; i < n; i++) hits.push(start + (i * bars) / n);
     start += bars;
@@ -220,12 +221,22 @@ export function bassFigure(ctx: Ctx, bar: number, hits: readonly BassHit[], k: B
 }
 
 /**
+ * The piece's motion in this section: a step busier where the piece is at its fullest (from three quarters of its
+ * peak), so a still piece still grows at its climax.
+ */
+export function motionOf(ctx: Ctx): Motion {
+  const m = ctx.mv.motion;
+  if (ctx.sec.energy < 0.75) return m;
+  return m === 'still' ? 'flowing' : 'driving';
+}
+
+/**
  * Whether the accompaniment plays at step `s` of a bar, at the movement's motion (see moods.ts): a still piece's moves
  * only on the beats, a flowing one's in eighths, a driving one's as written. A pattern keeps its notes where it
  * still plays: the same figure, fewer notes.
  */
 export function moves(ctx: Ctx, s: number): boolean {
-  const m = ctx.mv.motion;
+  const m = motionOf(ctx);
   return m === 'driving' || (m === 'flowing' ? s % 2 === 0 : ctx.onBeat(s));
 }
 
@@ -237,7 +248,7 @@ export function moves(ctx: Ctx, s: number): boolean {
 function asMoved(ctx: Ctx, hits: readonly BassHit[]): readonly BassHit[] {
   if (!hits.length) return hits;
   const joy = bounces(ctx.mv.mood);
-  if (ctx.mv.motion === 'still' || (!joy && ctx.mv.meter !== '4/4' && MAJOR_MODES.has(ctx.key.mode))) {
+  if (motionOf(ctx) === 'still' || (!joy && ctx.mv.meter !== '4/4' && MAJOR_MODES.has(ctx.key.mode))) {
     return [[0, ctx.spb, 0, Math.max(...hits.map((h) => h[3]))]];
   }
   const kept = hits.filter(([s]) => moves(ctx, s));
@@ -547,9 +558,8 @@ const STRUMS: Record<Meter, readonly (readonly [number, number, boolean])[]> = {
 export function strumBar(ctx: Ctx, bar: number, ns: readonly number[], k: StringKind, v: number): void {
   const plan = STRUMS[ctx.mv.meter];
   // a still piece strums once a bar, a flowing one only down
-  const played = plan.filter(([s, , up]) =>
-    ctx.mv.motion === 'driving' || (ctx.mv.motion === 'flowing' ? !up : s === 0)
-  );
+  const motion = motionOf(ctx);
+  const played = plan.filter(([s, , up]) => motion === 'driving' || (motion === 'flowing' ? !up : s === 0));
   for (const [s, g, up] of played) strum(ctx, ctx.barAt(bar, s), up ? ns.slice(2) : ns, k, v * g, undefined, up);
 }
 

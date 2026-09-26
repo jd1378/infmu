@@ -356,14 +356,18 @@ export function ember(ctx: Ctx): void {
   const quietFigure = figures.pick([[0, -1, 3, -1], [0, -1, -1, 3, -1, -1, 2, -1], [0, -1, 2, -1, 3, -1, -1, -1]]);
   const denseFigure = figures.pick([[0, 2, 3, 4, 3, 2], [0, 3, 2, 4, 3, 2], [0, 2, 4, 3, 2, 3]]);
   const droneFigure = figures.pick([[2, 1, 0, 1], [2, 0, 1, 0]]);
+  // (a player varies a figure by the phrase, not the bar: every other 8-bar phrase starts it a note later)
+  const phrased = (fig: readonly number[], b: number) =>
+    Math.floor(ctx.runBar(b) / 8) % 2 ? [...fig.slice(1), fig[0]] : fig;
   const shimmer = (b: number, v: number, dense = false) => {
     const ns = drone(ctx.chordAt(b));
-    if (dense) pickNotes(ctx, b, 'clean', ns, denseFigure, 2, v, -0.4);
-    else pickNotes(ctx, b, 'clean', ns, quietFigure, 4, v, -0.4);
+    if (dense) pickNotes(ctx, b, 'clean', ns, phrased(denseFigure, b), 2, v, -0.4);
+    else pickNotes(ctx, b, 'clean', ns, phrased(quietFigure, b), 4, v, -0.4);
   };
   const interlock = (b: number, v: number) => {
     const top = drone(ctx.chordAt(b)).slice(-3);
-    pickNotes(ctx, b, 'clean', top, droneFigure, ctx.mv.meter === '3/4' || ctx.mv.meter === '6/8' ? 4 : 6, v, 0.45);
+    const every = ctx.mv.meter === '3/4' || ctx.mv.meter === '6/8' ? 4 : 6;
+    pickNotes(ctx, b, 'clean', top, phrased(droneFigure, b), every, v, 0.45);
   };
   // the wall: power chords held through each chord, a guitarist each side
   const wall = (v: number, from = 0, to = bars) => {
@@ -439,35 +443,42 @@ export function ember(ctx: Ctx): void {
       stateTheme(0.9);
       break;
     case 'build': {
-      // one crescendo across the whole run of build sections
+      // one crescendo across the whole run of build sections, its layers entering one at a time wherever the
+      // sections' lines fall (a band doesn't change everything on one bar line): the picking thickens, the second
+      // guitar joins, the bass on the beats from a quarter of the way, a tremolo climbing from 45%, the bass in
+      // eighths from 55%, the wall swelling in from 60%; the drums grow all the way
       padChords(ctx, 'strings', { cut: (slot) => runCut(ctx, slot, 900, 4200), g: 0.45 });
-      // the bass holds the chords until the drums drive, then plays eighths (below)
-      const drive = Math.max(0, Math.min(bars, Math.ceil(ctx.runBars / 2 - ctx.runStartBar)));
-      if (ctx.runAt(1) > 0.25 && drive > 0) bassline(onBeats, 'pick', (b) => 0.5 + 0.1 * x(b), 0, drive);
+      const from = (at: number) => {
+        let b = 0;
+        while (b < bars && x(b) < at) b++;
+        return b;
+      };
       for (let b = 0; b < bars; b++) {
-        playGroove(ctx, g, b, { ...heavy, gain: 0.35 + 0.65 * x(b) });
-        if (x(b) < 0.5) {
-          shimmer(b, 0.45 + 0.2 * x(b), x(b) >= 0.25);
-          interlock(b, 0.35 + 0.2 * x(b));
-        } else {
-          // the bass drives eighths into the climax
-          bassFigure(ctx, b, eighths, 'pick', 0.55 + 0.3 * x(b));
-        }
+        const p = x(b);
+        playGroove(ctx, g, b, { ...heavy, gain: 0.35 + 0.65 * p });
+        if (p < 0.75) shimmer(b, 0.45 + 0.2 * p, p >= 0.25);
+        if (p >= 0.1 && p < 0.85) interlock(b, 0.35 + 0.2 * p);
+        if (p >= 0.25 && p < 0.55) bassFigure(ctx, b, onBeats, 'pick', 0.5 + 0.1 * p);
+        if (p >= 0.55) bassFigure(ctx, b, eighths, 'pick', 0.55 + 0.3 * p);
       }
-      // past halfway the guitar tremolos the chord tones and the wall comes in
-      const half = Math.max(0, Math.min(bars, Math.ceil(ctx.runBars / 2 - ctx.runStartBar)));
-      if (half < bars) {
-        // one chord tone a chord, higher in the chord as the run goes on, so the line climbs with the crescendo
-        const climb = ctx.chords.filter((c) => c.bar + c.bars > half).map((c) => {
-          const at = Math.max(half, c.bar);
-          const ns = drone(c).slice(1);
-          const n = ns[Math.min(ns.length - 1, Math.floor(Math.max(0, 2 * x(at) - 1) * ns.length))];
-          return { t: ctx.barAt(at), d: (c.bar + c.bars - at) * ctx.bar, n, v: 0.8 };
-        });
-        tremolo(ctx, climb, 'clean', 0.5);
-        wall(0.55, half, bars);
+      // one chord tone a chord, higher in the chord as the run goes on, so the line climbs with the crescendo
+      const trem = from(0.45);
+      const climb = ctx.chords.filter((c) => c.bar + c.bars > trem).map((c) => {
+        const at = Math.max(trem, c.bar);
+        const ns = drone(c).slice(1);
+        const n = ns[Math.min(ns.length - 1, Math.floor(Math.max(0, (x(at) - 0.45) / 0.55) * ns.length))];
+        return { t: ctx.barAt(at), d: (c.bar + c.bars - at) * ctx.bar, n, v: 0.8 };
+      });
+      tremolo(ctx, climb, 'clean', 0.5);
+      // the wall swells in chord by chord
+      const w = from(0.6);
+      for (const c of ctx.chords) {
+        if (c.bar + c.bars <= w) continue;
+        const at = Math.max(w, c.bar);
+        wall(0.3 + 0.35 * Math.min(1, (x(at) - 0.6) / 0.4), at, c.bar + c.bars);
       }
-      if (ctx.runAt(1) >= 0.75) runRoll(ctx, 0.3, 0.9, 'acoustic');
+      // the snare rolls through the last 40% of the run
+      runRoll(ctx, 0.3, 0.9, 'acoustic', 0.6);
       // the drummer takes the last two bars round the toms
       if (ctx.nextRole === 'drop' || ctx.nextRole === 'chorus') tomRoll(ctx, Math.min(2, bars), 0.45, 1, 'acoustic');
       if (ctx.nextRole !== 'build') {

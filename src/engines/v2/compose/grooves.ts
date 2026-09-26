@@ -2,10 +2,20 @@
 // A movement picks one groove and keeps it. Sections vary it only in the ways written here (light or full, the
 // layer, the answer bar, the fill), so a piece stays coherent while pieces of one style sound different.
 
-import type { BassKind, Meter } from '../types.ts';
+import type { BassKind, Meter, Role } from '../types.ts';
 import { hash32, Rng } from '../rng.ts';
 import type { Ctx } from './context.ts';
-import { bassFigure, type BassHit, type DrumBar, type DrumKit, drums, grid, type PercBar, percBar } from './parts.ts';
+import {
+  bassFigure,
+  type BassHit,
+  type DrumBar,
+  type DrumKit,
+  drums,
+  grid,
+  motionOf,
+  type PercBar,
+  percBar,
+} from './parts.ts';
 import { drummed } from './perform.ts';
 
 /** Pitched drums, taiko or toms: `lo` on the tonic (octave 2), `mid` a fifth above it, `hi` an octave above it. */
@@ -159,6 +169,8 @@ function fillOf(ctx: Ctx, g: Groove, full: boolean, rb: number, layer: boolean):
   return out;
 }
 
+const CALM: ReadonlySet<Role> = new Set(['intro', 'verse', 'prechorus', 'break', 'bridge', 'outro']);
+
 /** A bar's hats and shakers on the eighths only. */
 function eighths(p: GrooveBar): GrooveBar {
   const out = { ...p };
@@ -181,10 +193,12 @@ export function playGroove(ctx: Ctx, g: Groove, b: number, o: GroovePlay): void 
   const layer = ctx.role !== 'solo' && (ctx.returning || rb >= 8);
   const fill = rb % 8 === 7 && (full || ctx.role === 'verse');
   const kit = { ...o.kit, ...g.kit, lag: g.lag };
-  // a still piece's drums play only its big parts; a flowing one's hats and shakers play eighths
+  // a still piece's drums sit out its calm parts (they come in with its builds); a flowing one's hats and shakers
+  // play eighths
   const lanes = fill ? fillOf(ctx, g, full, rb, layer) : grooveLanes(g, full, rb, layer, false);
-  if (ctx.mv.motion !== 'still' || full) {
-    grooveBar(ctx, b, ctx.mv.motion === 'flowing' ? eighths(lanes) : lanes, kit, o.gain ?? 1, o.perc ?? 0.6);
+  const motion = motionOf(ctx);
+  if (motion !== 'still' || !CALM.has(ctx.role)) {
+    grooveBar(ctx, b, motion === 'flowing' ? eighths(lanes) : lanes, kit, o.gain ?? 1, o.perc ?? 0.6);
   }
   if (o.withBass === false) return;
   const bass = ctx.role === 'prechorus' ? g.bassFull : grooveBass(g, full, rb, fill);
