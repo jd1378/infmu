@@ -347,6 +347,7 @@ function pedal(ctx: Ctx): void {
     const next = isMelody(e) ? tune.find((x) => x.t > e.t + 1e-6) : undefined;
     const end = next ? Math.min(held, next.t + 0.03) : held;
     e.d = Math.max(e.d, end - e.t);
+    e.pedal = true;
   }
 }
 

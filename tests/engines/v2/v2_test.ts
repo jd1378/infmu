@@ -7,6 +7,7 @@ import { STYLE_IDS, STYLES } from '../../../src/engines/v2/styles.ts';
 import { Bus } from '../../../src/engines/v2/synth/bus.ts';
 import { lufs } from '../../../src/engines/v2/synth/dsp.ts';
 import { snare } from '../../../src/engines/v2/synth/instruments.ts';
+import { piano } from '../../../src/engines/v2/synth/modal.ts';
 import { early, melodyOffset, renderScore, tape } from '../../../src/engines/v2/synth/render.ts';
 import { string } from '../../../src/engines/v2/synth/strings.ts';
 import { wind } from '../../../src/engines/v2/synth/voice.ts';
@@ -720,4 +721,35 @@ Deno.test('the room answers with early reflections, different on each side; the 
   const mean = y.reduce((s, v) => s + v, 0) / N;
   const rest = Math.sqrt(y.reduce((s, v, i) => s + (v - mean - fund * x[i]) ** 2, 0) / N);
   assert(rest / (fund / Math.SQRT2) < 0.03, `the tape distorts ${((100 * rest) / (fund / Math.SQRT2)).toFixed(1)}%`);
+});
+
+Deno.test('a piano is heard by two microphones, and its pedal wakes the strings that match its notes', () => {
+  const tone = new Song('two-mics', ['nocturne']).movement(0).tone;
+  const sr = 22050;
+  const render = (pedal: boolean) => {
+    const b = new Bus(sr, 5, 1, tone);
+    piano(b, { i: 'piano', t: 0.1, d: 4, n: [64, 67, 72], v: 0.6, pedal });
+    return b;
+  };
+  const band = (b: Bus, from: number, to: number) => {
+    let mid = 0;
+    let side = 0;
+    for (let i = Math.round(from * sr); i < Math.round(to * sr); i++) {
+      const l = b.L[i] + b.ML[i];
+      const r = b.R[i] + b.MR[i];
+      mid += ((l + r) / 2) ** 2;
+      side += ((l - r) / 2) ** 2;
+    }
+    return { mid: 10 * Math.log10(mid), width: Math.sqrt(side / mid) };
+  };
+  const dry = render(false);
+  const held = render(true);
+  assert(band(dry, 0.1, 2).width > 0.1, 'a centred chord is heard in mono');
+  // the sympathetic strings build from nothing and bloom in the tail
+  assertAlmostEquals(band(held, 0.1, 0.12).mid, band(dry, 0.1, 0.12).mid, 0.1);
+  assert(band(held, 3, 4).mid > band(dry, 3, 4).mid + 1.5, 'the pedal adds nothing to the tail');
+  // and only a pedalled piece pedals
+  const pedalled = (style: StyleId) =>
+    sectionsOf(`two-mics-${style}`, style).some((x) => x.events.some((e) => e.i === 'piano' && e.pedal));
+  assert(pedalled('nocturne') && !pedalled('haze'));
 });

@@ -89,6 +89,46 @@ export class Bus {
   }
 
   /**
+   * A stereo voice: like voice(), but `fn` gives the mid signal and `side()` then the side signal of the same
+   * sample (left is mid + side, right mid - side), placed at `p` as a whole. The mono sum is the mid alone.
+   */
+  stereo(
+    t: number,
+    sec: number,
+    fn: (j: number, u: number) => number,
+    side: () => number,
+    p = 0,
+    rv = 0,
+    dl = 0,
+    duck = 0,
+  ): void {
+    const len = Math.min(this.n - Math.round(t * this.sr), Math.round(sec * this.sr));
+    if (len <= 0) return;
+    const S = new Float32Array(len);
+    const M = this.mono(len, (j, u) => {
+      const m = fn(j, u);
+      S[j] = side();
+      return m;
+    });
+    // the side takes the same fades as the mid
+    const fin = 0.001 * this.sr;
+    const fout = 0.01 * this.sr;
+    for (let j = 0; j < len; j++) S[j] *= Math.min(1, j / fin, (len - j) / fout);
+    const i0 = Math.round(t * this.sr);
+    const [a, b] = pan(p);
+    const oL = duck ? this.ML : this.L;
+    const oR = duck ? this.MR : this.R;
+    for (let j = 0; j < len; j++) {
+      const i = i0 + j;
+      const d = Math.SQRT2 * (1 - duck * (1 - this.duck[i]));
+      oL[i] += (M[j] + S[j]) * a * d;
+      oR[i] += (M[j] - S[j]) * b * d;
+      this.REV[i] += M[j] * rv;
+      this.DLY[i] += M[j] * dl;
+    }
+  }
+
+  /**
    * A drum hit. A machine's (no `take`) is rendered once per `key` and replayed scaled by its velocity: the
    * same sample every time. A player's is one of a few takes of the stroke, rendered at the velocity layer
    * nearest the hit (see Stroke). Only for sounds that are linear in their velocity.

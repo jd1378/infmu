@@ -26,11 +26,11 @@ files. The same seed plays the same endless song for anyone, so a song is shared
 - **Played, not sequenced.** What a person would play is performed: a melody swells through its phrase and breathes at
   its end, each player drifts a little around the beat, chords are rolled, and the band plays softer under the melody
   and swells into a bigger part. A returning melody gets a grace note here and there; winds and brass shade every note
-  with its own vibrato and swell into long ones; guitarists hammer on, slide and squeak; a slow piece is pedalled. The
-  band styles have a drummer with a feel of their own (a lazy backbeat, cymbals pushing ahead), ghost notes far under
-  the backbeat, flams and fills that change from phrase to phrase, and a different take of the drum on every stroke.
-  Their tempo breathes: the band pushes into its peak, calm phrases press on and relax, and a piece slows into its last
-  chord. Drum machines and sequencers keep their exact grid.
+  with its own vibrato and swell into long ones; guitarists hammer on, slide and squeak; a slow piece is pedalled, its
+  undamped strings ringing along. The band styles have a drummer with a feel of their own (a lazy backbeat, cymbals
+  pushing ahead), ghost notes far under the backbeat, flams and fills that change from phrase to phrase, and a different
+  take of the drum on every stroke. Their tempo breathes: the band pushes into its peak, calm phrases press on and
+  relax, and a piece slows into its last chord. Drum machines and sequencers keep their exact grid.
 - **Pieces that build.** A movement is an arc: it starts quiet, every return is bigger, breaks fall back, and the last
   chorus or drop is the peak. A returning part grows by one thing at a time (a counter-line answering the hook, a layer
   in the groove, the colour joining) and the peak doubles the hook. Loudness follows it over a range each style sets (a
@@ -44,10 +44,10 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   plays in a room of its own (early reflections from its walls, a small room for lo-fi, a hall for cinematic), the band
   styles have the faint noise floor of a recording, and the analog ones a touch of tape warmth.
 - **Instruments, all synthesized:** drums and hand percussion (congas, bongos, cowbell, ride, crash, snaps), supersaw
-  pads, strings, a pipe organ, a grand and an electric piano, acoustic and electric guitars (clean, or overdriven
-  through an amp model), harp, marimba, vibraphone, kalimba, glockenspiel and bells, flute, saxophone, brass, a hummed
-  voice, a choir, synth leads and basses, an 808 and a 303-style acid line. The acoustic ones are physical and modal
-  models fitted to measurements of real recordings.
+  pads, strings, a pipe organ, a grand piano (heard by a pair of microphones) and an electric piano, acoustic and
+  electric guitars (clean, or overdriven through an amp model), harp, marimba, vibraphone, kalimba, glockenspiel and
+  bells, flute, saxophone, brass, a hummed voice, a choir, synth leads and basses, an 808 and a 303-style acid line. The
+  acoustic ones are physical and modal models fitted to measurements of real recordings.
 - **A music player.** Play/pause, previous/next movement, a seekable bar showing the movement's form, repeat one
   movement, sleep timer with fade-out, volume, WAV download of the current movement, media keys (and lock-screen
   controls where the browser offers them), keyboard shortcuts, a choice of styles and of composer version.

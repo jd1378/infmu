@@ -47,9 +47,11 @@ export interface StyleDef {
   /**
    * How it sounds recorded: `size` scales the room's early reflections (a small room at 0.6 to a hall at 1.6),
    * `early` is their level against the reverb send; `hiss` the noise floor in dBFS (null: a clean digital
-   * production); `warmth` how hard the console and tape are driven (0: clean).
+   * production); `warmth` how hard the console and tape are driven (0: clean); `width` the side-to-mid ratio the
+   * bed is opened up to (stereo-recorded instruments in a room sit around 0.5 to 0.7, a piano recorded by a spaced
+   * pair wider still).
    */
-  record: { size: number; early: number; hiss: number | null; warmth: number };
+  record: { size: number; early: number; hiss: number | null; warmth: number; width: number };
 }
 
 export const ROLE_ENERGY: Record<Role, number> = {
@@ -94,7 +96,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0.4],
     tempo: { rubato: 0.04, push: 0, rit: 0.3 },
-    record: { size: 1.3, early: 0.5, hiss: -72, warmth: 0 },
+    record: { size: 1.3, early: 0.5, hiss: -72, warmth: 0, width: 0.6 },
   },
   haze: {
     id: 'haze',
@@ -123,7 +125,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0.5, 1],
     wow: [0.6, 1],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 0.6, early: 0.7, hiss: -60, warmth: 0.5 },
+    record: { size: 0.6, early: 0.7, hiss: -60, warmth: 0.5, width: 0.6 },
   },
   pulse: {
     id: 'pulse',
@@ -152,7 +154,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0.2],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 0.9, early: 0.3, hiss: null, warmth: 0.2 },
+    record: { size: 0.9, early: 0.3, hiss: null, warmth: 0.2, width: 0.6 },
   },
   rise: {
     id: 'rise',
@@ -181,7 +183,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 1.0, early: 0.25, hiss: null, warmth: 0 },
+    record: { size: 1.0, early: 0.25, hiss: null, warmth: 0, width: 0.6 },
   },
   cathedral: {
     id: 'cathedral',
@@ -210,7 +212,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0.05, push: 0.015, rit: 0.4 },
-    record: { size: 1.6, early: 0.6, hiss: -70, warmth: 0 },
+    record: { size: 1.6, early: 0.6, hiss: -70, warmth: 0, width: 0.8 },
   },
   acid: {
     id: 'acid',
@@ -239,7 +241,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0, rit: 0 },
-    record: { size: 0.8, early: 0.25, hiss: null, warmth: 0.2 },
+    record: { size: 0.8, early: 0.25, hiss: null, warmth: 0.2, width: 0.6 },
   },
   garden: {
     id: 'garden',
@@ -268,7 +270,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0.2],
     tempo: { rubato: 0, push: 0.012, rit: 0.25 },
-    record: { size: 0.8, early: 0.6, hiss: -68, warmth: 0.3 },
+    record: { size: 0.8, early: 0.6, hiss: -68, warmth: 0.3, width: 0.6 },
   },
   nocturne: {
     id: 'nocturne',
@@ -297,7 +299,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0.16, push: 0.01, rit: 0.4 },
-    record: { size: 0.9, early: 0.6, hiss: -70, warmth: 0 },
+    record: { size: 0.9, early: 0.6, hiss: -70, warmth: 0, width: 0.85 },
   },
   ember: {
     id: 'ember',
@@ -326,7 +328,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
     crackle: [0, 0],
     wow: [0, 0],
     tempo: { rubato: 0, push: 0.025, rit: 0.3 },
-    record: { size: 1.1, early: 0.6, hiss: -66, warmth: 0.4 },
+    record: { size: 1.1, early: 0.6, hiss: -66, warmth: 0.4, width: 0.6 },
   },
 };
 

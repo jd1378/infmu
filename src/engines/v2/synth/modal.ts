@@ -45,7 +45,8 @@ function keyRandom(seed: number): () => number {
 /**
  * A bank of exponentially decaying sines, each a two-pole resonator ringing freely (y = c1·y1 - c2·y2):
  * two multiplies a sample, the decay built into the recurrence. A mode may start negative (a copy that cancels
- * another at first: a swell). Modes more than 100 dB below their start are dropped by prune().
+ * another at first: a swell). Modes more than 100 dB below their start are dropped by prune(). Each mode can
+ * lean to one side of a stereo pair (see nextStereo()).
  */
 export class Modes {
   private readonly c1: Float64Array;
@@ -55,12 +56,20 @@ export class Modes {
   /** Per-sample log decay and the envelope so far, relative to the start (pruning never guesses from samples). */
   private readonly ld: Float64Array;
   private readonly env: Float64Array;
+  private readonly bal: Float64Array;
   n = 0;
+  /** The side signal of the last nextStereo(): left is mid + side, right mid - side. */
+  side = 0;
   constructor(cap: number) {
-    [this.c1, this.c2, this.y1, this.y2, this.ld, this.env] = [0, 0, 0, 0, 0, 0].map(() => new Float64Array(cap));
+    [this.c1, this.c2, this.y1, this.y2, this.ld, this.env, this.bal] = [0, 0, 0, 0, 0, 0, 0].map(() =>
+      new Float64Array(cap)
+    );
   }
-  /** A sine of amplitude `amp` at `freq` Hz starting at `phase`, falling 60 dB in `t60` seconds. */
-  add(freq: number, amp: number, t60: number, sr: number, phase = 0): void {
+  /**
+   * A sine of amplitude `amp` at `freq` Hz starting at `phase`, falling 60 dB in `t60` seconds; `side` (-1 to 1)
+   * how far it leans to the left.
+   */
+  add(freq: number, amp: number, t60: number, sr: number, phase = 0, side = 0): void {
     if (this.n === this.c1.length || freq >= sr * 0.45 || amp === 0) return;
     const w = (TAU * freq) / sr;
     const ld = -6.907755 / (t60 * sr);
@@ -73,6 +82,7 @@ export class Modes {
     this.y2[i] = (amp / (r * r)) * sin(phase - 2 * w);
     this.ld[i] = ld;
     this.env[i] = 1;
+    this.bal[i] = side;
   }
   next(): number {
     const { c1, c2, y1, y2 } = this;
@@ -85,9 +95,24 @@ export class Modes {
     }
     return s;
   }
+  /** Like next() (the mid signal), also summing each mode's lean into `side`. */
+  nextStereo(): number {
+    const { c1, c2, y1, y2, bal } = this;
+    let s = 0;
+    let d = 0;
+    for (let i = 0; i < this.n; i++) {
+      const y = c1[i] * y1[i] - c2[i] * y2[i];
+      y2[i] = y1[i];
+      y1[i] = y;
+      s += y;
+      d += y * bal[i];
+    }
+    this.side = d;
+    return s;
+  }
   /** Advances the envelopes by `samples` and drops the modes that have died away (call every few hundred samples). */
   prune(samples: number): void {
-    const { c1, c2, y1, y2, ld, env } = this;
+    const { c1, c2, y1, y2, ld, env, bal } = this;
     for (let i = 0; i < this.n; i++) {
       env[i] *= exp(ld[i] * samples);
       if (env[i] < 1e-5) {
@@ -98,6 +123,7 @@ export class Modes {
         y2[i] = y2[l];
         ld[i] = ld[l];
         env[i] = env[l];
+        bal[i] = bal[l];
         i--;
       }
     }
@@ -105,6 +131,11 @@ export class Modes {
 }
 
 // ------------------------------------------------------------------ piano
+
+/** How far a high partial leans to one microphone (a side-to-mid share); the low ones lean less. */
+const STEREO = 0.6;
+/** The sympathetic strings' level against the partials of the note that excites them (about -26 dB). */
+const SYMPATHY = 0.05;
 
 /** String stiffness: lowest around C3, rising steeply into the treble and gently into the bass (Iowa Steinway). */
 export const pianoB = (m: number) => (m >= 48 ? 1e-4 * 10 ** (0.0393 * (m - 48)) : 1e-4 * 10 ** (0.025 * (48 - m)));
@@ -115,6 +146,12 @@ export const pianoB = (m: number) => (m >= 48 ? 1e-4 * 10 ** (0.0393 * (m - 48))
  * little per-key voicing), each decaying in two stages: a prompt sound, and an aftersound ~20 dB down (~11 in
  * the bass) that rings four times longer on a second, slightly mistuned string, so the partials beat as the two
  * cross; the lowest six partials get a third string. The damper falls when the key is released.
+ *
+ * Heard in stereo as a pair of microphones hears it: the soundboard sends each partial a little differently
+ * towards each, the low ones nearly alike, the high ones less so (each partial leans to a side, so the mono sum
+ * stays the piano). With the sustain pedal down, the undamped strings whose partials match the note's answer it:
+ * a faint halo of the note's lower partials, slightly off its tuning, that builds over a tenth of a second,
+ * rings on long after the note's own sound and stops when the pedal lifts.
  */
 export function piano(b: Bus, e: E<'piano'>): void {
   const sr = b.sr;
@@ -127,7 +164,9 @@ export function piano(b: Bus, e: E<'piano'>): void {
     const f0 = b.hz(m);
     const B = pianoB(m);
     const rnd = keyRandom(Math.round(m * 7) + 1);
-    const modes = new Modes(104);
+    const room = keyRandom(Math.round(m * 7) + 0x5eed);
+    const lean = (fk: number) => (2 * room() - 1) * STEREO * min(1, fk / 1500);
+    const modes = new Modes(120);
     // the aftersound sits ~20 dB under the prompt sound, closer in the bass
     const after = 10 ** ((-20 + 9 * min(1.5, max(0, (48 - m) / 12))) / 20);
     let top = 0;
@@ -148,11 +187,19 @@ export function piano(b: Bus, e: E<'piano'>): void {
       const ta = min(30, 4 * tp);
       // the beat between unison strings: faster up the keyboard and for higher partials
       const beat = (0.25 + 0.45 * pow(fk / 1000, 0.7)) * (0.6 + 0.8 * rnd());
-      modes.add(fk, a * (1 - after), tp, sr);
+      modes.add(fk, a * (1 - after), tp, sr, 0, lean(fk));
       if (a > top * 0.03) {
         const g = a * after;
-        modes.add(fk + beat, g, ta, sr, TAU * rnd());
-        if (k <= 6) modes.add(fk - 0.7 * beat, g * 0.6, ta * 0.8, sr, TAU * rnd());
+        modes.add(fk + beat, g, ta, sr, TAU * rnd(), lean(fk));
+        if (k <= 6) modes.add(fk - 0.7 * beat, g * 0.6, ta * 0.8, sr, TAU * rnd(), lean(fk));
+        if (e.pedal && k <= 8) {
+          // a sympathetic string: a swell (a copy that cancels it at first) that rings on while the pedal is down
+          const fs = fk * (1 + (room() - 0.5) * 0.003);
+          const ph = TAU * room();
+          const side = 2 * room() - 1;
+          modes.add(fs, a * SYMPATHY, min(30, 1.5 * ta), sr, ph, side * STEREO);
+          modes.add(fs, -a * SYMPATHY, 0.15, sr, ph, side * STEREO);
+        }
       }
     });
     // the hammer's knock: a short thud of noise, darker and quieter for soft blows; up the keyboard the
@@ -166,22 +213,26 @@ export function piano(b: Bus, e: E<'piano'>): void {
     const knock = exp(-1 / (0.008 * sr));
     let damper = 1;
     let hammer = knockGain;
-    b.voice(
+    let side = 0;
+    b.stereo(
       t0,
       e.d + rel * 4,
       (j, u) => {
         if ((j & 1023) === 1023) modes.prune(1024);
-        let s = modes.next();
+        let k = g;
         if (u > e.d) {
           damper *= damp;
-          s *= damper;
+          k *= damper;
         }
+        let s = modes.nextStereo() * k;
+        side = modes.side * k;
         if (hammer > 1e-6 * top) {
-          s += thump.run(b.noise.next()) * hammer;
+          s += thump.run(b.noise.next()) * hammer * g;
           hammer *= knock;
         }
-        return s * g;
+        return s;
       },
+      () => side,
       panFor(m, 0.4),
       0.3,
       0.05,

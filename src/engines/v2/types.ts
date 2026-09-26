@@ -53,6 +53,7 @@ export interface Mix {
   early: number; // their level against the reverb send
   hiss: number | null; // noise floor, dBFS; null for none
   warmth: number; // console and tape drive, 0 = clean
+  width: number; // side-to-mid ratio the bed is opened up to
 }
 
 export interface Movement {
@@ -154,7 +155,8 @@ export type Ev =
     squeak?: number;
   }
   | { i: 'mallet'; t: number; n: number; v: number; k: MalletKind; p?: number; lead?: boolean }
-  | { i: 'piano'; t: number; d: number; n: number[]; v: number; strum?: number; lead?: boolean }
+  /** `pedal`: the sustain pedal is down while it sounds, so the undamped strings answer it. */
+  | { i: 'piano'; t: number; d: number; n: number[]; v: number; strum?: number; lead?: boolean; pedal?: boolean }
   | { i: 'choir'; t: number; d: number; n: number[]; vowel: Vowel; g?: number }
   | { i: 'wind'; t: number; k: WindKind; ns: Note[]; lead?: boolean }
   | { i: 'acid'; t: number; ns: AcidNote[]; cut: [number, number]; res: number; env: number; square?: boolean }

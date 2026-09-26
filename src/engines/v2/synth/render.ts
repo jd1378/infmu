@@ -70,7 +70,7 @@ export function renderScore(score: Score, sampleRate: number, a4 = 440): Rendere
   const of = (s: Stem) => score.events.filter((e) => stemOf(e) === s);
   const mix = score.movement.mix;
   playAll(b, of('bed'));
-  widen(b, BED_WIDTH);
+  widen(b, mix.width);
   const bed = dryLufs(b);
   playAll(b, of('fx'));
   const against = (ref: number, offset: number, lo: number, hi: number) => (own: number) =>
@@ -102,9 +102,6 @@ function playAll(b: Bus, events: readonly Ev[]): void {
     b.ampUsed = false;
   }
 }
-
-/** Side-to-mid ratio the bed is opened up to (stereo-recorded instruments in a room sit around 0.5 to 0.7). */
-const BED_WIDTH = 0.6;
 
 /**
  * Mono-compatible width: a decorrelated copy of the centre (all-passed, and high-passed so the low end stays
