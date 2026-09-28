@@ -93,6 +93,39 @@ export interface SectionScore {
   cues: Cue[];
 }
 
+/** What an instrument is: how a listener would group it, and what it looks like to play. */
+export type InstrumentFamily =
+  | 'piano'
+  | 'keys'
+  | 'organ'
+  | 'mallets'
+  | 'kalimba'
+  | 'bells'
+  | 'guitar'
+  | 'harp'
+  | 'bass'
+  | 'synth bass'
+  | 'winds'
+  | 'voices'
+  | 'synths'
+  | 'pads'
+  | 'drums'
+  | 'percussion'
+  | 'effects';
+
+/** An instrument a listener can play by itself (see Engine.renderNote). */
+export interface InstrumentInfo {
+  id: string;
+  name: string;
+  family: InstrumentFamily;
+  /** A pitched instrument's lowest and highest MIDI notes. */
+  range?: readonly [lo: number, hi: number];
+  /** An unpitched one's sounds (a kit's drums, an effect's kinds), in the order they're laid out. */
+  hits?: readonly { id: string; name: string }[];
+  /** A line on what it is. */
+  about: string;
+}
+
 export interface SongPlan {
   readonly version: number;
   readonly phrase: string;
@@ -134,6 +167,10 @@ export interface Engine {
   /** How far the music may range, as a listener can choose (the first is the default); absent when fixed. */
   readonly characters?: readonly { id: string; label: string }[];
   song(phrase: string, styles?: readonly string[], length?: string, character?: string): SongPlan;
+  /** Every instrument the engine synthesizes that can be played alone; absent when it offers none. */
+  readonly instruments?: readonly InstrumentInfo[];
+  /** One note of an instrument: a MIDI note for a pitched one, a hit id for an unpitched one. */
+  renderNote?(instrument: string, note: number | string, sampleRate: number): Rendered;
   score(song: SongPlan, index: number): SectionScore;
   render(song: SongPlan, index: number, sampleRate: number): Rendered;
   /** Sections [from, from + count) played back to back with their tails, as the player hears them. */

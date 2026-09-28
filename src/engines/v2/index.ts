@@ -6,6 +6,7 @@ import type { Cue, Engine, KeyInfo, MovementInfo, SectionScore, SongPlan, StyleI
 import { composeSection } from './compose/index.ts';
 import { type Character, CHARACTERS, type Length, LENGTHS, Song } from './plan.ts';
 import { STYLE_IDS, STYLES } from './styles.ts';
+import { INSTRUMENTS, noteScore } from './instruments.ts';
 import { renderScore } from './synth/render.ts';
 import { renderSpan } from './synth/span.ts';
 import { type Key, keyName, MODES, noteName } from './theory.ts';
@@ -173,6 +174,15 @@ export const v2: Engine = {
     { id: 'steady', label: 'Steady: calm moods, familiar shapes, no surprises' },
   ],
   song: (phrase, styles, length, character) => new Plan(phrase, styles, length, character),
+  instruments: INSTRUMENTS.map(({ id, name, family, range, hits, about }) => ({
+    id,
+    name,
+    family,
+    range,
+    hits,
+    about,
+  })),
+  renderNote: (instrument, note, sampleRate) => renderScore(noteScore(instrument, note), sampleRate),
   score(song, index): SectionScore {
     const p = plan(song);
     const s = composeSection(p.song, index);

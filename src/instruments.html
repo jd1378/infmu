@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+    >
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <title>Instruments | infmu</title>
+    <meta name="description"
+      content="Every instrument infmu synthesizes, drawn and playable with the mouse, a finger or the computer keyboard.">
+    <meta name="theme-color" content="#16131f">
+    <meta name="color-scheme" content="dark">
+    <link rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%23c7b6ff' stroke-width='5'/%3E%3Cpath d='M32 14 47 40H17Z' fill='%23c7b6ff'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..700&family=Hanken+Grotesk:wght@400;500;600&display=swap">
+    <style>
+    /* the player's tokens (see index.html); the hue follows the family of the instrument that is out */
+    :root {
+      --h: 285;
+      --c: 0.12;
+      --l: 0.8;
+      --bg: oklch(0.155 0.03 var(--h));
+      --bg-2: oklch(0.2 0.035 var(--h));
+      --bg-3: oklch(0.26 0.04 var(--h));
+      --ink: oklch(0.95 0.012 var(--h));
+      --ink-2: oklch(0.74 0.03 var(--h));
+      --ink-3: oklch(0.62 0.035 var(--h));
+      --line: oklch(0.34 0.035 var(--h));
+      --accent: oklch(var(--l) var(--c) var(--h));
+      --accent-ink: oklch(0.18 0.04 var(--h));
+      --serif: 'Bodoni Moda', 'Didot', 'Bodoni 72', Georgia, serif;
+      --sans: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html,
+    body {
+      background: var(--bg);
+      transition: background-color 1.2s ease;
+    }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      color: var(--ink);
+      font: 400 16px/1.5 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button {
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+    }
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    a {
+      color: var(--ink-2);
+      text-underline-offset: 3px;
+    }
+    a:hover {
+      color: var(--ink);
+    }
+    header.top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px clamp(16px, 4vw, 48px) 0;
+    }
+    .wordmark {
+      font: italic 600 26px/1 var(--serif);
+      margin: 0;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .wordmark span {
+      font: 400 14px/1 var(--sans);
+      font-style: normal;
+      color: var(--ink-3);
+      margin-left: 10px;
+    }
+    .top nav {
+      display: flex;
+      gap: 18px;
+      font-size: 14px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+      gap: clamp(20px, 3vw, 48px);
+      padding: 28px clamp(16px, 4vw, 48px) 48px;
+    }
+    #list {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      max-height: calc(100dvh - 32px);
+      overflow: auto;
+      padding-right: 6px;
+    }
+    #list h2 {
+      font: 500 13px/1.3 var(--sans);
+      color: var(--ink-3);
+      margin: 18px 0 6px;
+    }
+    #list h2:first-child {
+      margin-top: 0;
+    }
+    #list ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    #list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: 0;
+      border-left: 2px solid transparent;
+      padding: 5px 10px;
+      font-size: 15px;
+      color: var(--ink-2);
+      border-radius: 0 8px 8px 0;
+    }
+    #list button:hover {
+      color: var(--ink);
+      background: var(--bg-2);
+    }
+    #list button[aria-pressed='true'] {
+      color: var(--ink);
+      background: var(--bg-2);
+      border-left-color: var(--accent);
+    }
+
+    .stage h1 {
+      font: italic 500 clamp(34px, 5vw, 56px)/1.05 var(--serif);
+      margin: 0 0 8px;
+    }
+    #about {
+      color: var(--ink-2);
+      max-width: 62ch;
+      margin: 0 0 22px;
+    }
+    #drawing {
+      background: radial-gradient(120% 90% at 50% 0%, var(--bg-2), var(--bg) 70%);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: clamp(12px, 2.5vw, 28px);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px 20px;
+      margin: 14px 2px 26px;
+      color: var(--ink-3);
+      font-size: 14px;
+    }
+    #octave {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #octave[hidden] {
+      display: none;
+    }
+    #span {
+      color: var(--ink);
+      min-width: 9ch;
+      text-align: center;
+    }
+    .chip {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 14px;
+    }
+    .chip:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    #status {
+      margin-left: auto;
+    }
+    .stage h2 {
+      font: italic 500 22px/1.2 var(--serif);
+      margin: 0 0 4px;
+    }
+    .hint {
+      color: var(--ink-3);
+      font-size: 14px;
+      margin: 0 0 12px;
+      max-width: 70ch;
+    }
+
+    /* ------------------------------------------------------------ the drawings */
+    .instrument {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 56vh;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* only what plays takes the pointer: dots, eyes, caps and labels drawn over a part let it through */
+    .instrument *:not(.part),
+    .legend text {
+      pointer-events: none;
+    }
+    .instrument .part {
+      cursor: pointer;
+      transition: fill 0.12s ease, stroke 0.12s ease;
+    }
+    .instrument .part:hover {
+      filter: brightness(1.12);
+    }
+    .instrument .body {
+      fill: var(--bg-2);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+    .instrument .rim,
+    .instrument .fret {
+      fill: none;
+      stroke: var(--ink-3);
+      stroke-width: 2;
+    }
+    .instrument .knob {
+      fill: var(--bg-3);
+      stroke: var(--ink-3);
+      stroke-width: 2;
+    }
+    .instrument .screen {
+      fill: oklch(0.12 0.02 var(--h));
+      stroke: var(--line);
+    }
+    .instrument .wave {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2.5;
+    }
+    .instrument .white {
+      fill: var(--ink);
+      stroke: var(--bg);
+      stroke-width: 2;
+    }
+    .instrument .black {
+      fill: var(--bg);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+    .instrument .wood {
+      fill: oklch(0.47 0.07 45);
+      stroke: oklch(0.32 0.05 45);
+      stroke-width: 2;
+    }
+    .instrument .metal {
+      fill: oklch(0.8 0.015 var(--h));
+      stroke: oklch(0.55 0.02 var(--h));
+      stroke-width: 2;
+    }
+    .instrument .metal.dark {
+      fill: oklch(0.62 0.02 var(--h));
+    }
+    .instrument .cap {
+      fill: oklch(0.55 0.02 var(--h));
+    }
+    .instrument .tube {
+      fill: var(--bg-3);
+    }
+    .instrument .node {
+      fill: oklch(0.2 0.03 var(--h));
+    }
+    .instrument .cell,
+    .instrument .hit {
+      fill: transparent;
+    }
+    .instrument .cell:hover,
+    .instrument .hit:hover {
+      fill: oklch(1 0 0 / 0.06);
+      filter: none;
+    }
+    .instrument .dot {
+      fill: var(--accent);
+      opacity: 0;
+      transition: opacity 0.12s ease;
+    }
+    .instrument .string {
+      stroke: var(--ink-2);
+    }
+    .instrument .nut {
+      stroke: var(--ink);
+      stroke-width: 7;
+    }
+    .instrument .inlay {
+      fill: var(--ink-3);
+      opacity: 0.6;
+    }
+    .instrument .column {
+      fill: none;
+      stroke: var(--ink-3);
+      stroke-width: 10;
+      stroke-linecap: round;
+    }
+    .instrument .column.thin {
+      stroke-width: 6;
+    }
+    .instrument .harp-string {
+      stroke: var(--ink-2);
+      stroke-width: 2;
+      transition: stroke 0.12s ease;
+    }
+    .instrument .harp-string.c {
+      stroke: oklch(0.63 0.17 25);
+    }
+    .instrument .harp-string.f {
+      stroke: oklch(0.6 0.13 250);
+    }
+    .instrument .harp-string.sharp {
+      stroke: var(--ink-3);
+      stroke-dasharray: 4 6;
+    }
+    .instrument .bridge {
+      stroke: var(--ink-3);
+      stroke-width: 12;
+      stroke-linecap: round;
+    }
+    .instrument .hole {
+      fill: var(--bg);
+      stroke: var(--line);
+    }
+    .instrument .pad {
+      fill: var(--bg-3);
+      stroke: var(--ink-3);
+      stroke-width: 2;
+    }
+    .instrument .sax-body {
+      fill: none;
+      stroke: oklch(0.7 0.09 80);
+      stroke-width: 58;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .instrument .eye {
+      fill: var(--ink-2);
+    }
+    .instrument .sax-bell {
+      fill: oklch(0.7 0.09 80);
+      stroke: oklch(0.5 0.08 80);
+      stroke-width: 2;
+    }
+    .instrument .key-label.small {
+      font-size: 18px;
+    }
+    .instrument .hit-label.small {
+      font-size: 17px;
+    }
+    .instrument .face {
+      fill: var(--bg-3);
+      stroke: var(--ink-3);
+      stroke-width: 2;
+    }
+    .instrument .mouth {
+      fill: var(--bg);
+      stroke: none;
+    }
+    .instrument .mouth.line {
+      stroke: var(--bg);
+      stroke-width: 3;
+    }
+    .instrument .mouth.line {
+      fill: none;
+    }
+    .instrument .drumhead {
+      fill: oklch(0.86 0.015 var(--h));
+      stroke: var(--ink-3);
+      stroke-width: 4;
+    }
+    .instrument .cymbal {
+      fill: oklch(0.72 0.1 85);
+      stroke: oklch(0.52 0.08 85);
+      stroke-width: 2;
+    }
+    .instrument .groove {
+      fill: none;
+      stroke: oklch(0 0 0 / 0.22);
+      stroke-width: 2;
+    }
+    .instrument .pad-square {
+      fill: var(--bg-3);
+      stroke: var(--ink-3);
+      stroke-width: 2;
+    }
+    .instrument .pad-square.sampler {
+      fill: oklch(0.34 0.02 var(--h));
+    }
+    .instrument .lit:not(.dot):not(.harp-string):not(.mouth):not(.cell):not(.hit) {
+      fill: var(--accent);
+    }
+    .instrument .dot.lit {
+      opacity: 1;
+    }
+    .instrument .harp-string.lit {
+      stroke: var(--accent);
+      stroke-width: 5;
+      stroke-dasharray: none;
+    }
+    .instrument .mouth.lit {
+      fill: var(--accent);
+      stroke: var(--accent);
+    }
+    .instrument .key-label {
+      font: 600 22px var(--sans);
+      fill: var(--ink-3);
+    }
+    .instrument .key-label.on-white,
+    .instrument .key-label.on-head {
+      fill: oklch(0.42 0.03 var(--h));
+    }
+    .instrument .note-label {
+      font: 500 18px var(--sans);
+      fill: var(--ink-3);
+    }
+    .instrument .note-label.on-white,
+    .instrument .note-label.on-metal {
+      fill: oklch(0.45 0.03 var(--h));
+    }
+    .instrument .hit-label {
+      font: 600 22px var(--sans);
+      fill: var(--ink);
+    }
+    .instrument .hit-label.on-head {
+      fill: oklch(0.25 0.04 var(--h));
+    }
+    .instrument .screen-label {
+      font: 500 18px var(--sans);
+      fill: var(--accent);
+    }
+
+    /* ------------------------------------------------------------ the keyboard legend */
+    .legend {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-width: 1100px;
+    }
+    .legend .kbd rect {
+      fill: var(--bg-2);
+      stroke: var(--line);
+      stroke-width: 1.5;
+      transition: fill 0.1s ease;
+    }
+    .legend .kbd:not(.mapped):not(.action) {
+      opacity: 0.4;
+    }
+    .legend .kbd.mapped rect {
+      fill: var(--bg-3);
+      stroke: var(--ink-3);
+    }
+    .legend .kbd.sharp rect {
+      fill: oklch(0.13 0.02 var(--h));
+    }
+    .legend .kbd.action rect {
+      stroke-dasharray: 4 4;
+    }
+    .legend .kbd.down rect {
+      fill: var(--accent);
+      stroke: var(--accent);
+    }
+    .legend .cap {
+      font: 600 13px var(--sans);
+      fill: var(--ink-3);
+    }
+    .legend .plays {
+      font-family: var(--sans);
+      font-weight: 600;
+      fill: var(--ink);
+    }
+    .legend .kbd.down text {
+      fill: var(--accent-ink);
+    }
+
+    @media (max-width: 760px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      #list {
+        position: static;
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        max-height: none;
+        padding: 0 0 6px;
+      }
+      #list h2 {
+        display: none;
+      }
+      #list ul {
+        display: contents;
+      }
+      #list li {
+        flex: none;
+      }
+      #list button {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 12px;
+        white-space: nowrap;
+      }
+      #list button[aria-pressed='true'] {
+        border-color: var(--accent);
+      }
+      #status {
+        margin-left: 0;
+      }
+    }
+    /* a phone has no keyboard to map: the legend goes */
+    @media (max-width: 600px) and (pointer: coarse) {
+      #keyboard-h,
+      #keyboard-hint,
+      #legend {
+        display: none;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+    }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <a class="wordmark" href="./">infmu<span>instruments</span></a>
+      <nav>
+        <a href="./">Back to the player</a>
+        <a href="https://github.com/jd1378/infmu">Source</a>
+      </nav>
+    </header>
+    <main>
+      <nav id="list" aria-label="Instruments"></nav>
+      <section class="stage" aria-labelledby="name">
+        <h1 id="name">Instruments</h1>
+        <p id="about">Every instrument the composer synthesizes, playable on its own.</p>
+        <div id="drawing"></div>
+        <div class="controls">
+          <div id="octave">
+            <button class="chip" id="lower" type="button" aria-label="Octave down">Lower</button>
+            <span id="span" aria-live="polite"></span>
+            <button class="chip" id="higher" type="button" aria-label="Octave up">Higher</button>
+          </div>
+          <span id="status" aria-live="polite"></span>
+        </div>
+        <h2 id="keyboard-h">On the keyboard</h2>
+        <p class="hint" id="keyboard-hint">
+          Play the drawing with the mouse or a finger, or the keys shown here. Up and down move an octave; left and
+          right change the instrument. Hold a key to hold a note.
+        </p>
+        <div id="legend"></div>
+      </section>
+    </main>
+    <script type="module" src="./instruments.js"></script>
+  </body>
+</html>

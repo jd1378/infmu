@@ -35,10 +35,13 @@ export class RenderPool {
     this.slots.forEach((_, i) => (this.slots[i].worker = this.spawn(i)));
   }
 
-  render(req: RenderJob): Promise<Extract<RenderResponse, { ok: true }>> {
+  /** `urgent` jobs go to the front of the queue: a note someone is playing now, before the ones prepared for later. */
+  render(req: RenderJob, urgent = false): Promise<Extract<RenderResponse, { ok: true }>> {
     return new Promise((resolve, reject) => {
       if (this.dead()) return reject(new Error('audio rendering is unavailable in this browser'));
-      this.queue.push({ req: { ...req, id: this.nextId++ } as RenderRequest, resolve, reject });
+      const job = { req: { ...req, id: this.nextId++ } as RenderRequest, resolve, reject };
+      if (urgent) this.queue.unshift(job);
+      else this.queue.push(job);
       this.drain();
     });
   }
