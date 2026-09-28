@@ -44,6 +44,12 @@ interface Model {
   t4k: number;
   /** Second polarization: share of the pluck, detune in cents, T60s relative to the first. */
   pol: readonly [number, number, number];
+  /**
+   * The prompt sound: a third loop, the string's swing across the soundboard, which drains into it in a fraction of
+   * the time, so a note falls fast and then rings on softly. Its share of the pluck at 200 Hz and at 800 Hz (between,
+   * by log frequency), and its T60s relative to the first.
+   */
+  prompt?: readonly [number, number, number];
   /** Body: a high-pass under the air resonance [Hz, Q], and resonant modes [Hz, Q, peak gain] added to it. */
   body?: { hp: readonly [number, number]; modes: readonly (readonly [number, number, number])[] };
   /** Pickup: distance from the bridge as a fraction of the string, and its electrical resonance [Hz, Q]. */
@@ -131,15 +137,18 @@ const MODELS: Record<StringKind, Model> = {
     gain: 0.79,
     maxLen: 5,
   },
-  // concert harp, plucked near the middle with the pad of the finger: even partials weak, a dark attack
+  // concert harp, plucked near the middle with the pad of the finger: even partials weak, a dark attack. Its soundboard
+  // thins toward the treble, so the high strings give it their energy faster: a mid or high note drops 15 dB in half
+  // a second (recorded A4 to E5: -6, -15, -18, -33 dB at 0.1, 0.5, 1, 2 s), a bass note hardly at all
   harp: {
     beta: [0.4, 0.48],
     exc: 1800,
     excTilt: 0.8,
-    t1: 10,
-    tilt: 0.2,
+    t1: 8.8,
+    tilt: 0.5,
     t4k: 0.4,
-    pol: [0.45, 4, 0.7],
+    pol: [0.3, 6, 0.8],
+    prompt: [0.1, 0.65, 0.1],
     body: { hp: [150, 0.8], modes: [[450, 1.5, 0.4]] },
     knock: [0.02, 1200, 2],
     gain: 0.99,
@@ -427,6 +436,12 @@ export function string(b: Bus, e: E<'string'>): void {
     : bent
     ? new GlideLoop(sr, fb, ratio * t0, ratio * m.t4k, bend, lowest)
     : new Loop(sr, fb, ratio * t0, ratio * m.t4k);
+  const q = m.prompt ? m.prompt[0] + (m.prompt[1] - m.prompt[0]) * Math.min(1, Math.max(0, Math.log2(f / 200) / 2)) : 0;
+  const P = !q
+    ? null
+    : bent
+    ? new GlideLoop(sr, f, m.prompt![2] * t0, m.prompt![2] * m.t4k, bend, lowest)
+    : new Loop(sr, f, m.prompt![2] * t0, m.prompt![2] * m.t4k);
   const { pluck, knock } = excitation(b, e, m, f, rnd);
   const fade = 0.25 * len;
   // a swell: the volume pedal comes up after the pick, so no attack is heard at all
@@ -434,8 +449,9 @@ export function string(b: Bus, e: E<'string'>): void {
   const tick = (j: number, t: number): number => {
     const x = j < pluck.length ? pluck[j] : 0;
     const held = t < d;
-    let y = A.tick((1 - share) * x, held, t) + (j < knock.length ? knock[j] : 0);
-    if (B) y += B.tick(share * x, held, t);
+    let y = A.tick((1 - q) * (1 - share) * x, held, t) + (j < knock.length ? knock[j] : 0);
+    if (B) y += B.tick((1 - q) * share * x, held, t);
+    if (P) y += P.tick(q * x, held, t);
     if (swell && t < swell) y *= smooth(t / swell);
     return t > len - fade ? (y * (len - t)) / fade : y;
   };
@@ -457,7 +473,8 @@ export function string(b: Bus, e: E<'string'>): void {
     else b.ampUsed = true;
     return;
   }
-  const g = e.v * m.gain;
+  // (1 + q): a note whose prompt sound drains it fast is as loud as before over its first half second
+  const g = e.v * m.gain * (1 + q);
   // the clean post-rock guitar lives in its delays and a big room
   const [rv, dl] = { harp: [0.4, 0.15], electric: [0.22, 0.3], clean: [0.5, 0.55] }[e.k as string] ?? [0.22, 0.12];
   if (m.chorus) {

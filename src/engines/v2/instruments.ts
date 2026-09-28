@@ -240,7 +240,7 @@ export const INSTRUMENTS: readonly Instrument[] = [
     'winds',
     [49, 81],
     'haze',
-    'A tenor saxophone, breathy and reedy.',
+    'An alto saxophone, breathy and reedy.',
     (n) => ({ i: 'wind', t: 0, k: 'sax', ns: [{ t: 0, d: 1.3, n, v: V }], lead: true }),
   ),
   pitched(
@@ -399,6 +399,13 @@ const lengthOf = (e: Ev): number => {
   return Math.max(1, d + 0.2);
 };
 
+/** A plucked or struck note with no end of its own (a harp's, a bar's, a bell's) rings for seconds: a long tail lets
+ * it ring out instead of fading with the room. */
+function tailOf(x: Instrument, e: Ev): number {
+  const ends = ('d' in e && typeof e.d === 'number') || 'ns' in e;
+  return x.note && !ends ? 6.5 : 2.5;
+}
+
 /**
  * A one-note section: `note` is a MIDI note (clamped to the instrument's range) for a pitched instrument, a hit id
  * for an unpitched one. Played at the energy of a chorus, in its style's mix.
@@ -424,7 +431,7 @@ export function noteScore(id: string, note: number | string): Score {
     local: 0,
     offset: 0,
     duration,
-    tail: 2.5,
+    tail: tailOf(x, ev),
     bpm: mv.bpm,
     bars: [0, duration],
     events: [ev],

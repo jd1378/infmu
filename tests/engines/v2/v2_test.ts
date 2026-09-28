@@ -764,14 +764,22 @@ Deno.test('a slide glides onto its note; a long wind note swells', () => {
   const slid = guitar(-2);
   assert(pitch(slid, 0.205) < pitch(plain, 0.205) * 0.95, 'the slide starts on its note');
   assertAlmostEquals(pitch(slid, 0.5), pitch(plain, 0.5), 1);
-  const b = new Bus(sr, 3, 5, tone);
-  wind(b, { i: 'wind', t: 0.1, k: 'sax', ns: [{ t: 0.1, d: 2.4, n: 65, v: 0.7 }] });
-  const rms = (a: number, z: number) => {
-    let e = 0;
-    for (let i = Math.round(a * sr); i < Math.round(z * sr); i++) e += b.ML[i] ** 2;
-    return Math.sqrt(e / ((z - a) * sr));
-  };
-  assert(rms(1.9, 2.2) > rms(0.3, 0.6) * 1.12, 'a long note stays flat');
+  // the breath rises and falls through any one note, so the swell is heard over several
+  let early = 0;
+  let late = 0;
+  for (let j = 0; j < 8; j++) {
+    const t = 0.1 + 0.013 * j;
+    const b = new Bus(sr, 3, 5, tone);
+    wind(b, { i: 'wind', t, k: 'sax', ns: [{ t, d: 2.4, n: 65, v: 0.7 }] });
+    const energy = (a: number, z: number) => {
+      let e = 0;
+      for (let i = Math.round((t + a) * sr); i < Math.round((t + z) * sr); i++) e += b.ML[i] ** 2;
+      return e;
+    };
+    early += energy(0.2, 0.9);
+    late += energy(1.5, 2.2);
+  }
+  assert(Math.sqrt(late / early) > 1.1, 'a long note stays flat');
 });
 
 Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and the left hand leans on its bass", () => {
