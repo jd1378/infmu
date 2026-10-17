@@ -21,28 +21,40 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   film theme) with a planned contour: one climax, the rest reached by step, and a character of its own (busy or
   spacious, stepping or leaping, entering on the beat or just after it, sometimes pentatonic). Its verses may sing the
   hook, a tune of their own or nothing, and its intro may give a glimpse of the hook. Some pieces sway in three, as
-  waltzes or in 6/8, with grooves, piano figures and tunes written for it. Phrases are built the way themes are
-  (question and answer, sentence, AABA, rising sequence), each statement continuing from the last, and every chorus
-  restates the hook (a long last chorus sings its last line again). The harmony runs from four-chord loops to
-  eight-chord phrases that travel and cadence, with borrowed chords and secondary dominants; a bridge sometimes moves to
-  the key a fourth up and comes home, sections end on the chord that leads into the next one, last choruses sometimes
-  lift a key, and silences are written in: stop-time bars, a held breath before a chorus, a dead-silent beat before a
-  drop.
+  waltzes or in 6/8, and a few walk in five or seven (5/4, 7/8), with grooves, piano figures and tunes written for their
+  meter. Phrases are built the way themes are (question and answer, sentence, AABA, rising sequence), each statement
+  continuing from the last, and every chorus restates the hook (a long last chorus sings its last line again). The
+  harmony runs from four-chord loops to eight-chord phrases that travel and cadence, with borrowed chords and secondary
+  dominants; a bridge sometimes moves to the key a fourth up and comes home, sections end on the chord that leads into
+  the next one, last choruses sometimes lift a key, and silences are written in: stop-time bars, a held breath before a
+  chorus, a dead-silent beat before a drop.
+- **A premise per piece.** Pieces differ in spirit, not only on the surface: each is planned around a premise drawn
+  first. An arc (the climb; an early peak and its afterglow; a plateau held with no single climax; a cold open on the
+  big part; a piece that starts full and lets go; one that ends on its peak), a mood (wonder, transcendence, tenderness,
+  nostalgia, peace, joy, power, unease or grief, each tilting tempo, mode, register, harmony and room together), a
+  motion (still, flowing or driving), a harmonic language (loops, a pedal, a lament, a vamp or colour chords, now and
+  then ending open), a kind of tune (a song, a lament, a riff, a recitation, a fanfare, a long through-composed line, or
+  none) and a room, from a close booth to a cathedral. Some pieces are built on one idea (an ostinato, or loops drifting
+  out of phase), and about half have one surprise (a jump to a new key, a big part suddenly hushed, a part left bare, a
+  pause, the peak in half time). A piece goes far on one or two of these, never on all.
 - **Grooves with a feel.** Each style has a bank of grooves written the way a producer programs them (drums and a bass
   line that locks with the kick, with verse, chorus and fill bars); a movement draws one and keeps it, and two pieces of
   a style in a row never share one.
 - **Played, not sequenced.** What a person would play is performed: a melody swells through its phrase and breathes at
   its end, each player drifts a little around the beat, chords are rolled, and the band plays softer under the melody
   and swells into a bigger part. A returning melody gets a grace note here and there; winds and brass shade every note
-  with its own vibrato and swell into long ones; guitarists hammer on, slide and squeak; a slow piece is pedalled, its
-  undamped strings ringing along. The band styles have a drummer with a feel of their own (a lazy backbeat, cymbals
-  pushing ahead), ghost notes far under the backbeat, flams and fills that change from phrase to phrase, and a different
-  take of the drum on every stroke. Their tempo breathes: the band pushes into its peak, calm phrases press on and
-  relax, and a piece slows into its last chord. Drum machines and sequencers keep their exact grid.
-- **Pieces that build.** A movement is an arc: it starts quiet, every return is bigger, breaks fall back, and the last
-  chorus or drop is the peak. A returning part grows by one thing at a time (a counter-line answering the hook, a layer
-  in the groove, the colour joining) and the peak doubles the hook. Loudness follows it over a range each style sets (a
-  few LU for lo-fi, up to 18 for cinematic), measured against reference recordings.
+  with its own vibrato and swell into long ones; a sax or flute player's breath swells and eases, changes notes without
+  stopping the air, lets a phrase's last note go, breathes in the rests and, when a line runs on too long, cuts a note
+  short to snatch a breath; guitarists hammer on, slide and squeak; a slow piece is pedalled, its undamped strings
+  ringing along. The band styles have a drummer with a feel of their own (a lazy backbeat, cymbals pushing ahead), ghost
+  notes far under the backbeat, flams and fills that change from phrase to phrase, and a different take of the drum on
+  every stroke. Their tempo breathes: the band pushes into its peak, calm phrases press on and relax, and a piece slows
+  into its last chord. Drum machines and sequencers keep their exact grid.
+- **Pieces that build.** A movement follows its arc: in the classic climb it starts quiet, every return is bigger,
+  breaks fall back, and the last chorus or drop is the peak. A returning part grows by one thing at a time (a
+  counter-line answering the hook, a layer in the groove, the colour joining) and the peak doubles the hook. Loudness
+  follows it over a range each style sets (a few LU for lo-fi, up to 18 for cinematic), measured against reference
+  recordings.
 - **Nine styles, one band each:** ambient, lo-fi, synthwave, trance, cinematic, acid house, organic downtempo, piano and
   post-rock. A movement keeps its style, its lead voice and one signature texture from start to end; the band grows
   rather than changes. Variety comes from movement to movement.
@@ -58,7 +70,13 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   acoustic ones are physical and modal models fitted to measurements of real recordings.
 - **A music player.** Play/pause, previous/next movement, a seekable bar showing the movement's form, repeat one
   movement, sleep timer with fade-out, volume, WAV download of the current movement, media keys (and lock-screen
-  controls where the browser offers them), keyboard shortcuts, a choice of styles and of composer version.
+  controls where the browser offers them), keyboard shortcuts, a choice of styles, of length and of composer version,
+  and a steady or adventurous character (a steady song keeps to calm moods and arcs, has no surprises and always comes
+  home).
+- **The instruments page** ([instruments.html](https://jd1378.github.io/infmu/instruments.html)). Every instrument the
+  composer synthesizes, drawn as the thing a player touches (keyboards, fretboards, bars, harp strings, a saxophone, a
+  drum kit from above) and playable with the mouse, a finger or the computer keyboard, with a legend of what each key
+  plays. Each note is heard in its style's room and mix, as it sounds in the music.
 - **The dial.** The circle of fifths, turned so the key's tonic sits at the top. The chord playing now is drawn as a
   shape, notes light up where they sit, and the melody leaves a trail. The whole page takes its colour from the key and
   turns with a key change. It reads the same score the synthesizer plays, so what you see is what you hear.
@@ -68,10 +86,10 @@ files. The same seed plays the same endless song for anyone, so a song is shared
 A seed must keep its song forever, so the composer is versioned and a released version never changes. Seeds and links
 carry their version; new seeds use the latest one, and the seed dialog can switch.
 
-| Version |                                                                                                                                                                                                                                     |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| v2      | Longer movements with a choice of length and a real arc, nine styles with producer-written grooves, many more instruments modelled on recordings, hooks that return and grow, turnarounds, written silences, key lifts, a stem mix. |
-| v1      | The original: shorter movements in five styles. Links made before versions existed play v1.                                                                                                                                         |
+| Version |                                                                                                                                                                                                                                                                                                  |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| v2      | Longer movements with a choice of length and an arc, a premise per piece (mood, arc, harmony, tune, surprises), nine styles with producer-written grooves, played parts and breathing players, many more instruments modelled on recordings, hooks that return and grow, odd meters, a stem mix. |
+| v1      | The original: shorter movements in five styles. Links made before versions existed play v1.                                                                                                                                                                                                      |
 
 Each version is a sealed engine under `src/engines/vN` behind the port in `src/core/engine.ts`. Tests pin each released
 version's output (plans, scores and audio fingerprints), so an accidental change fails CI. To improve the music, copy
