@@ -17,6 +17,7 @@ import {
   percBar,
 } from './parts.ts';
 import { drummed } from './perform.ts';
+import { INVENTED, inventGroove, INVENTS } from './invent.ts';
 
 /** Pitched drums, taiko or toms: `lo` on the tonic (octave 2), `mid` a fifth above it, `hi` an octave above it. */
 export interface TomBar {
@@ -95,17 +96,33 @@ export function grooveBar(ctx: Ctx, bar: number, p: GrooveBar, kit: DrumKit, gai
 
 /**
  * The movement's groove, drawn once from its style's bank. A piece right after one of the same style draws
- * again until it differs, so two in a row never share a beat.
+ * again until it differs, so two in a row never share a beat. About half the 4/4 pieces of a style that invents
+ * (see invent.ts) play a groove of their own instead, keeping the drawn one's kit, feel and acid line.
  */
 export function grooveFor<G extends Groove>(ctx: Ctx, bank: Weighted<G>): G {
   const draw = (seed: number, k: number) => new Rng(hash32(seed, 0x6d6f74)).fork('groove', k).weighted(bank);
   const prev = ctx.mv.index > 0 ? ctx.song.movement(ctx.mv.index - 1) : null;
   const taken = prev?.style === ctx.mv.style ? draw(prev.seed, 0).name : null;
-  for (let k = 0; k < 8; k++) {
-    const g = draw(ctx.mv.seed, k);
-    if (g.name !== taken) return g;
-  }
-  return draw(ctx.mv.seed, 0);
+  const written = (): G => {
+    for (let k = 0; k < 8; k++) {
+      const g = draw(ctx.mv.seed, k);
+      if (g.name !== taken) return g;
+    }
+    return draw(ctx.mv.seed, 0);
+  };
+  const g = written();
+  const families = INVENTS[ctx.mv.style];
+  const own = new Rng(hash32(ctx.mv.seed, 0x696e76));
+  if (!families || ctx.mv.meter !== '4/4' || !own.chance(INVENTED)) return g;
+  const invented = inventGroove(own.fork('beat'), own.fork('family').weighted(families));
+  return {
+    ...g,
+    ...invented,
+    name: `invented ${ctx.mv.seed}`,
+    answer: undefined,
+    bassFill: undefined,
+    bassAnswer: undefined,
+  };
 }
 
 /** How a style plays its groove: its kit and bass voice, and the levels. */

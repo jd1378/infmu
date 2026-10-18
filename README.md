@@ -39,7 +39,9 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   pause, the peak in half time). A piece goes far on one or two of these, never on all.
 - **Grooves with a feel.** Each style has a bank of grooves written the way a producer programs them (drums and a bass
   line that locks with the kick, with verse, chorus and fill bars); a movement draws one and keeps it, and two pieces of
-  a style in a row never share one.
+  a style in a row never share one. In trance, acid, synthwave, downtempo, cinematic and post-rock, about half the
+  pieces in 4/4 invent a groove of their own instead, from the genre's grammar: four on the floor, the backbeat or the
+  half-time snare kept, the kick's syncopations, ghost notes, hats, fill and bass drawn afresh.
 - **Played, not sequenced.** What a person would play is performed: a melody swells through its phrase and breathes at
   its end, each player drifts a little around the beat, chords are rolled, and the band plays softer under the melody
   and swells into a bigger part. A returning melody gets a grace note here and there; winds and brass shade every note
