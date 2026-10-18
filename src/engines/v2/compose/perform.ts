@@ -1,13 +1,12 @@
-// A player's touch. Written notes sit exactly on the grid at a handful of fixed velocities; players don't. This
-// pass performs each pitched part the way the KTH performance rules describe (Friberg, Bresin and Sundberg,
-// "Overview of the KTH rule system for musical performance", 2006): a melody swells towards the middle of its
-// phrase and relaxes at the end; the last note before a breath comes a little late and is held longer; each
-// player drifts slowly and on their own around the beat (correlated, not jittered: white-noise timing only
-// sounds sloppy); short notes are detached and long ones joined; chords are rolled a little differently every
-// time. Only what a person would play is performed: arpeggiators, the 303 and the sequenced leads of dance
-// music keep a machine's grid, and the kick and the bass keep time (groove research finds wobble there only
-// hurts; a bassist's touch shows in dynamics). A style played by a band has a drummer too (see drummer()).
-// Everything is drawn from the seed's own streams, so a seed still plays the same performance.
+// A player's touch. Written notes sit at a handful of fixed velocities; players shade them. This pass performs each
+// pitched part the way the KTH performance rules describe (Friberg, Bresin and Sundberg, "Overview of the KTH rule
+// system for musical performance", 2006): a melody swells towards the middle of its phrase and relaxes at the end,
+// its last note before a breath is held longer, short notes are detached and long ones joined. The touch is in the
+// dynamics and the lengths only: every note stays exactly where it is written (drift around the beat, a late
+// backbeat and rolled chords were tried, and heard as mess). Only what a person would play is performed:
+// arpeggiators, the 303 and the sequenced leads of dance music keep a machine's levels. A style played by a band has
+// a drummer too (see drummer()). Everything is drawn from the seed's own streams, so a seed still plays the same
+// performance.
 
 import { MOODS } from '../moods.ts';
 import type { Rng } from '../rng.ts';
@@ -16,10 +15,8 @@ import { type Ev, isMelody, type Note, type StyleId, TAKES, VIB_HELD } from '../
 import type { Ctx } from './context.ts';
 import { ANYONE, guitarist } from './guitarist.ts';
 
-/** How a part is played: how far its player drifts (s), their jitter (s), how much their dynamics move. */
+/** How a part is played: how much its player's dynamics move. */
 interface Touch {
-  drift: number;
-  jitter: number;
   loud: number;
   /** The tune: phrase dynamics and breaths. */
   melody: boolean;
@@ -35,18 +32,18 @@ function touch(ctx: Ctx, e: Ev): Touch | null {
       if ((ctx.mv.style === 'rise' || ctx.mv.style === 'acid') && e.k !== 'brass' && e.k !== 'flute') return null;
       break;
     case 'bass':
-      // a bassist (round, saw) plays in time with the kick, with their own dynamics; synth basses are sequenced
-      return e.k === 'round' || e.k === 'saw' ? { drift: 0, jitter: 0.0015, loud: 0.05, melody: false } : null;
+      // a bassist (round, saw) has their own dynamics; synth basses are sequenced
+      return e.k === 'round' || e.k === 'saw' ? { loud: 0.05, melody: false } : null;
     case 'choir':
     case 'organ':
-      return { drift: 0.008, jitter: 0.004, loud: 0, melody: false };
+      return { loud: 0, melody: false };
   }
   if (!PLAYED.has(e.i)) return null;
   const melody = isMelody(e);
-  return { drift: melody ? 0.012 : 0.008, jitter: 0.003, loud: 0.06, melody };
+  return { loud: 0.06, melody };
 }
 
-/** A slow wander in about [-1, 1]: three unrelated slow sines, as a player's drift around the beat. */
+/** A slow wander in about [-1, 1]: three unrelated slow sines, as a player's dynamics drift. */
 function wander(rng: Rng): (t: number) => number {
   const parts = [0, 1, 2].map(() => [rng.range(0.07, 0.5), rng.range(0, 2 * Math.PI)] as const);
   return (t) => parts.reduce((s, [f, ph]) => s + Math.sin(2 * Math.PI * f * t + ph), 0) / 2;
@@ -54,9 +51,8 @@ function wander(rng: Rng): (t: number) => number {
 
 type Played = { t: number; v: number; d?: number };
 
-/** One player's reading of their part; `hands` seeds their sense of time, shared by the parts they play. */
-function player(ctx: Ctx, rng: Rng, hands: Rng, { drift, jitter, loud: moves, melody }: Touch) {
-  const time = wander(hands.fork('time'));
+/** One player's reading of their part. */
+function player(ctx: Ctx, rng: Rng, { loud: moves, melody }: Touch) {
   const loud = wander(rng.fork('loud'));
   const phrase = 4 * ctx.bar;
   // the mood's touch: held on in grief or peace, detached in joy
@@ -65,15 +61,10 @@ function player(ctx: Ctx, rng: Rng, hands: Rng, { drift, jitter, loud: moves, me
     let v = n.v * (1 + moves * (loud(n.t) + rng.jitter(0.8)));
     // a phrase swells towards its middle and relaxes at its end
     if (melody) v *= 0.9 + 0.2 * Math.sin(Math.PI * ((n.t % phrase) / phrase));
-    let t = n.t + drift * time(n.t) + rng.jitter(jitter);
     let d = n.d;
     if (d !== undefined && moves) d *= Math.min(1, (short ? rng.range(0.72, 0.92) : rng.range(0.9, 1)) * legato);
-    // the last note before a breath comes a little late and is held on
-    if (breath && melody) {
-      t += Math.min(0.035, 0.06 * ctx.beat) * rng.range(0.5, 1);
-      if (d !== undefined) d *= 1.12;
-    }
-    n.t = Math.max(0, t);
+    // the last note before a breath is held on
+    if (breath && melody && d !== undefined) d *= 1.12;
     n.v = Math.max(0.05, v);
     if (d !== undefined) n.d = d;
   };
@@ -86,7 +77,6 @@ export function perform(ctx: Ctx): void {
   drummer(ctx);
   listen(ctx);
   pedal(ctx);
-  hammers(ctx);
   fretwork(ctx);
 }
 
@@ -102,33 +92,27 @@ function players(ctx: Ctx): void {
     }
   }
   for (const [name, { how, events }] of parts) {
-    // a pianist's two hands keep one time: the tune and the accompaniment drift together
-    const hands = ctx.rng.fork('perform', events[0].i === 'piano' ? 'piano' : name);
-    const play = player(ctx, ctx.rng.fork('perform', name), hands, how);
+    const play = player(ctx, ctx.rng.fork('perform', name), how);
     const onsets = events.flatMap((e) => ('ns' in e ? e.ns.map((n) => n.t) : [e.t])).sort((a, b) => a - b);
     // a breath: a rest of half a beat or more after the note (a note without a length: nothing new for 1.5 beats)
     const breathAfter = (t: number, d?: number) => {
       const next = onsets.find((x) => x > t + 1e-6);
       return next === undefined || (d === undefined ? next - t >= 1.5 * ctx.beat : next - (t + d) >= ctx.beat / 2);
     };
-    events.forEach((e, index) => {
+    events.forEach((e) => {
       if ('ns' in e) {
         const ns = e.ns as Note[];
         ns.forEach((n, k) => {
           const gap = (ns[k + 1]?.t ?? n.t + n.d) - n.t;
           play(n, breathAfter(n.t, n.d), gap < ctx.beat * 0.75);
         });
-        e.t = ns[0].t;
         return;
       }
       const d = 'd' in e ? e.d : undefined;
       const n: Played = { t: e.t, v: 'v' in e ? e.v : 1, d };
       play(n, breathAfter(e.t, d), d !== undefined && d < ctx.beat * 0.75);
-      e.t = n.t;
       if ('v' in e) e.v = n.v;
       if ('d' in e && n.d !== undefined) e.d = n.d;
-      // a chord is rolled a little differently every time
-      if (e.i === 'piano') e.strum = (e.strum ?? 0.01) * ctx.rng.fork('roll', name, index).range(0.6, 1.6);
     });
   }
 }
@@ -138,29 +122,11 @@ function players(ctx: Ctx): void {
 type Limb = 'kick' | 'snare' | 'hat' | 'perc' | 'tom';
 type Hit = Extract<Ev, { i: 'kick' | 'snare' | 'hat' | 'perc' | 'tom' }>;
 
-/**
- * Where each limb of a style's drummer sits against the beat, in seconds (+ late). A feel is systematic, not
- * random: drummers asked to play laid back or pushed place their strokes consistently a few ms off the beat
- * (Danielsen et al., "Effects of instructed timing and tempo on snare drum sound in drum kit performance",
- * 2015). The styles without an entry are played by a drum machine: the same sample, exactly where it was
- * programmed.
- */
-const FEEL: Partial<Record<StyleId, Record<Limb, number>>> = {
-  // a lazy rim, a shaker a hair ahead
-  drift: { kick: 0, snare: 0.008, hat: -0.002, perc: 0.004, tom: 0.004 },
-  // the lean of a sampled break: kicks early, hats and snares behind (the grooves' own lag adds to it)
-  haze: { kick: -0.004, snare: 0.004, hat: 0.006, perc: 0.006, tom: 0 },
-  // the shaker drives, the hand drums sit back
-  garden: { kick: 0, snare: 0.006, hat: -0.003, perc: 0.005, tom: 0 },
-  // heavy sticks speak late
-  cathedral: { kick: 0, snare: 0.003, hat: 0, perc: 0.002, tom: 0.006 },
-  nocturne: { kick: 0, snare: 0.004, hat: 0, perc: 0.004, tom: 0.004 },
-  // a rock drummer pushes on the cymbals and leans back on a fat backbeat
-  ember: { kick: 0, snare: 0.006, hat: -0.004, perc: -0.003, tom: 0.002 },
-};
+/** The styles whose drums a drummer plays; the others are played by a drum machine, the same sample every time. */
+const DRUMMED: ReadonlySet<StyleId> = new Set(['drift', 'haze', 'garden', 'cathedral', 'nocturne', 'ember']);
 
 /** Whether a style's drums are played by a drummer (else a drum machine plays them as programmed). */
-export const drummed = (style: StyleId): boolean => style in FEEL;
+export const drummed = (style: StyleId): boolean => DRUMMED.has(style);
 
 /** How far each limb's dynamics reach: a stroke's level against the loudest of its part is raised to this. */
 // a real ghost note sits 19 to 25 dB under the backbeat (measured on recorded kits): x^2 puts the grid's ghost
@@ -171,18 +137,15 @@ const CYMBALS: ReadonlySet<string> = new Set(['ride', 'crash', 'acousticRide', '
 const limbOf = (e: Hit): Limb => e.i === 'perc' ? (CYMBALS.has(e.k) ? 'hat' : 'perc') : e.i;
 
 /**
- * A drummer plays the written kit: ghost notes fall well under the backbeat (a machine plays the grid's three
- * levels; a player's reach is wider) and are never twice the same; every limb sits where the style's feel puts
- * it and wanders a little around there, slowly, as players do; the last bar of each phrase swells into the
- * next; and every stroke is one of the drum's takes, never the same take twice in a row.
+ * A drummer plays the written kit, every stroke on the beat: ghost notes fall well under the backbeat (a machine
+ * plays the grid's three levels; a player's reach is wider) and are never twice the same; the last bar of each
+ * phrase swells into the next; and every stroke is one of the drum's takes, never the same take twice in a row.
  */
 function drummer(ctx: Ctx): void {
-  const feel = FEEL[ctx.mv.style];
-  if (!feel) return;
-  // one drummer across the movement: their drift runs on through the sections
+  if (!drummed(ctx.mv.style)) return;
+  // one drummer across the movement: their dynamics run on through the sections
   const from = ctx.mv.sections.slice(0, ctx.local).reduce((n, s) => n + s.bars, 0) * ctx.bar;
   const parts = new Map<string, Hit[]>();
-  const flams: Hit[] = [];
   for (const e of ctx.events) {
     if (e.i !== 'kick' && e.i !== 'snare' && e.i !== 'hat' && e.i !== 'perc' && e.i !== 'tom') continue;
     // each tom is a drum of its own
@@ -195,7 +158,6 @@ function drummer(ctx: Ctx): void {
     hits.sort((a, b) => a.t - b.t);
     const limb = limbOf(hits[0]);
     const rng = ctx.rng.fork('drummer', name);
-    const time = wander(ctx.mrng.fork('drummer', limb, 'time'));
     const loud = wander(ctx.mrng.fork('drummer', limb, 'loud'));
     const top = Math.max(...hits.map((e) => e.v));
     // a take other than the stroke before's
@@ -215,17 +177,9 @@ function drummer(ctx: Ctx): void {
       const into = (e.t / ctx.bar - bar - 0.5) * 2;
       if (rb % 4 === 3 && into > 0) v *= 1 + (rb % 8 === 7 ? 0.25 : 0.12) * into;
       e.v = Math.max(0.02, v);
-      e.t = Math.max(0, e.t + feel[limb] + 0.003 * time(from + e.t) + (limb === 'kick' ? rng.jitter(0.0015) : 0));
-      // a fill's accents are flammed: the other stick a hair before, softly
-      const fill = rb % 8 === 7 && into > 0 && rel > 0.8;
-      if ((limb === 'snare' || limb === 'tom') && fill && rng.chance(0.5)) {
-        const t = Math.max(0, e.t - rng.range(0.018, 0.03));
-        flams.push({ ...e, t, v: e.v * rng.range(0.3, 0.45), take: fresh() });
-      }
       e.take = fresh();
     }
   }
-  ctx.push(...flams);
 }
 
 // ------------------------------------------------------------------ the rest of the band
@@ -358,21 +312,6 @@ function pedal(ctx: Ctx): void {
   }
 }
 
-/** Seconds of hammer flight per unit of (1 - velocity)^2, against a key struck at 0.6. */
-const HAMMER = 0.1;
-
-/**
- * A piano's hammers fly: a key struck hard sounds sooner after the finger than one pressed gently, so a melody
- * played out over a soft accompaniment sounds a few tens of ms ahead of it, one of the ways a pianist's tune
- * stands out (Goebl, "Melody lead in piano performance: expressive device or artifact?", 2001). Centred on a
- * middling touch, so the piano as a whole stays with the band.
- */
-function hammers(ctx: Ctx): void {
-  for (const e of ctx.events) {
-    if (e.i === 'piano') e.t = Math.max(0, e.t + HAMMER * ((1 - Math.min(1, e.v)) ** 2 - 0.16));
-  }
-}
-
 /**
  * A guitarist's fretting hand. A note a step from the one before and joined to it is hammered on or pulled
  * off, not picked (always after a grace note, unless the hand wears a slide); a held note joined to the one
@@ -441,7 +380,6 @@ function fretwork(ctx: Ctx): void {
     }
     if (!melody) continue;
     for (const e of notes) {
-      e.t = Math.max(0, e.t + h.lag);
       if (e.vib === undefined && !e.swell && (e.d ?? 0) >= VIB_HELD) {
         e.vib = h.vib;
         e.vibRate = h.rate;

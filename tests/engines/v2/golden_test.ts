@@ -1,8 +1,9 @@
 // v2 is frozen: these fingerprints were taken when v2 was released. If one changes, a seed someone shared now
 // plays something else. Don't update them; put the change in a new engine version instead.
-// One deliberate exception, the day after the release: about half the 4/4 pieces of the styles with drums now invent
-// a groove of their own (compose/invent.ts). That changed two entries below (golden-short's section 3 score and
-// section 1 audio); every other plan, score and rendered fingerprint here is still what was released.
+// One deliberate exception, the day after the release, while it had barely been heard: about half the 4/4 pieces of
+// the styles with drums now invent a groove of their own (compose/invent.ts), and every part plays in time (no
+// drift around the beat, no late backbeat, no flams, no rolled chords, the same fill each time: it was heard as
+// mess). These fingerprints were re-taken then; the plans are still what was released.
 
 import { assertEquals } from '@std/assert';
 import { composeSection } from '../../../src/engines/v2/compose/index.ts';
@@ -25,33 +26,33 @@ const pcm = (a: Float32Array) => {
 
 const GOLDEN: Record<string, string> = {
   'plan:amber-quiet-harbor': 'c3c81592',
-  'score:amber-quiet-harbor:0': 'e382a876',
-  'score:amber-quiet-harbor:3': 'ffeb02f5',
-  'score:amber-quiet-harbor:11': '76811b63',
-  'score:amber-quiet-harbor:26': 'b6f4cfb5',
-  'audio:amber-quiet-harbor:1': '4ce23a335fb9a411',
-  'audio:amber-quiet-harbor:7': 'a93bf31a8f2fb1c7',
+  'score:amber-quiet-harbor:0': '8a7e1e63',
+  'score:amber-quiet-harbor:3': '8433c917',
+  'score:amber-quiet-harbor:11': 'ec26fe52',
+  'score:amber-quiet-harbor:26': 'e1e3273a',
+  'audio:amber-quiet-harbor:1': '6163c52b54dded9a',
+  'audio:amber-quiet-harbor:7': '95abc85a78d5f519',
   'plan:hello': 'b885ffdf',
-  'score:hello:0': '28b7d62d',
+  'score:hello:0': '7f13b5bd',
   'score:hello:3': '17d9e5ad',
-  'score:hello:11': '3691288c',
-  'score:hello:26': '15c57156',
-  'audio:hello:1': 'b0faa985489d756c',
-  'audio:hello:7': '2cf868a8eb96fccf',
+  'score:hello:11': '3e4be180',
+  'score:hello:26': '9bd08a0c',
+  'audio:hello:1': '8a36d0204154dadd',
+  'audio:hello:7': '10f08a07d4999fb4',
   'plan:golden': '3a1aca84',
-  'score:golden:0': 'ca88ac44',
-  'score:golden:3': '6c561ede',
-  'score:golden:11': '18aeade5',
-  'score:golden:26': '910f26ec',
-  'audio:golden:1': 'c9cc7cb43e947685',
-  'audio:golden:7': 'fd75e9821dc7b8d7',
+  'score:golden:0': '54344489',
+  'score:golden:3': '962cb7a4',
+  'score:golden:11': '1faec44a',
+  'score:golden:26': 'f5db14e9',
+  'audio:golden:1': 'e013621915aefa4f',
+  'audio:golden:7': 'a6e1d93776b7dcf8',
   'plan:golden-short': '8879a71',
-  'score:golden-short:0': 'd2429a1e',
-  'score:golden-short:3': '3d8ed57b',
-  'score:golden-short:11': 'b7cf2af4',
-  'score:golden-short:26': '309dc5c4',
-  'audio:golden-short:1': 'dec7b80ef8094257',
-  'audio:golden-short:7': 'bb8f4e1b1edfdd1',
+  'score:golden-short:0': '883429db',
+  'score:golden-short:3': '5cf17947',
+  'score:golden-short:11': '51498f7e',
+  'score:golden-short:26': 'bb0606e6',
+  'audio:golden-short:1': '1e489f184a3bdc12',
+  'audio:golden-short:7': '2234a0367c46dc',
 };
 
 // every style and every length, between them

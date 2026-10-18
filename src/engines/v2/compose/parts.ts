@@ -43,8 +43,6 @@ export interface DrumKit {
   hats?: number;
   /** An acoustic kit's toms and cymbals (the kick and snare are chosen above). */
   acoustic?: boolean;
-  /** The backbeat (snare, clap, rim) this fraction of a 16th behind the grid: a lazy, lo-fi feel. */
-  lag?: number;
 }
 
 export interface DrumBar {
@@ -55,11 +53,10 @@ export interface DrumBar {
   shaker?: string;
 }
 
-/** One bar of drums from grid strings, with humanized velocity and timing (the kick stays on the grid). */
+/** One bar of drums from grid strings, every stroke on the grid, the snares and hats a little uneven in level. */
 export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1): void {
   const r = ctx.rng;
   const t = (s: number) => ctx.barAt(bar, s);
-  const human = (s: number) => Math.max(0, t(s) + r.jitter(0.004));
   if (p.kick) {
     grid(
       p.kick,
@@ -74,7 +71,7 @@ export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1)
       (s, v) =>
         ctx.push({
           i: 'snare',
-          t: human(s) + (kit.lag ?? 0) * ctx.s16,
+          t: t(s),
           v: v * gain * (0.94 + 0.06 * r.next()),
           k: kit.snare ?? 'big',
         }),
@@ -85,15 +82,15 @@ export function drums(ctx: Ctx, bar: number, p: DrumBar, kit: DrumKit, gain = 1)
   if (p.hat) {
     grid(
       p.hat,
-      (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg * (0.82 + 0.18 * r.next()), k: kit.hat ?? 'closed' }),
+      (s, v) => ctx.push({ i: 'hat', t: t(s), v: v * hg * (0.82 + 0.18 * r.next()), k: kit.hat ?? 'closed' }),
       ctx.spb,
     );
   }
-  if (p.open) grid(p.open, (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg, k: 'open' }), ctx.spb);
+  if (p.open) grid(p.open, (s, v) => ctx.push({ i: 'hat', t: t(s), v: v * hg, k: 'open' }), ctx.spb);
   if (p.shaker) {
     grid(
       p.shaker,
-      (s, v) => ctx.push({ i: 'hat', t: human(s), v: v * hg * (0.8 + 0.2 * r.next()), k: 'shaker' }),
+      (s, v) => ctx.push({ i: 'hat', t: t(s), v: v * hg * (0.8 + 0.2 * r.next()), k: 'shaker' }),
       ctx.spb,
     );
   }
@@ -136,10 +133,12 @@ export function runRoll(ctx: Ctx, v0: number, v1: number, k: SnareKind = 'roll',
     for (let i = 0; i < n; i++) hits.push(start + (i * bars) / n);
     start += bars;
   }
-  hits.forEach((bar, i) => {
-    const local = bar - ctx.runStartBar;
+  // on the 16th grid: a roll that starts part-way into the run still lands on its beats
+  const steps = [...new Set(hits.map((bar) => Math.round(bar * ctx.spb)))];
+  steps.forEach((step, i) => {
+    const local = step / ctx.spb - ctx.runStartBar;
     if (local < 0 || local >= ctx.bars) return;
-    ctx.push({ i: 'snare', t: ctx.barAt(local), v: v0 + (v1 - v0) * (i / Math.max(1, hits.length - 1)) ** 1.5, k });
+    ctx.push({ i: 'snare', t: ctx.barAt(local), v: v0 + (v1 - v0) * (i / Math.max(1, steps.length - 1)) ** 1.5, k });
   });
 }
 
@@ -681,7 +680,7 @@ export function percBar(ctx: Ctx, bar: number, p: PercBar, gain = 1, acoustic = 
         (s, v) =>
           ctx.push({
             i: 'perc',
-            t: Math.max(0, ctx.barAt(bar, s) + r.jitter(0.004)),
+            t: ctx.barAt(bar, s),
             v: v * gain * (0.85 + 0.15 * r.next()),
             k: acoustic && k === 'crash' ? 'acousticCrash' : acoustic && k === 'ride' ? 'acousticRide' : k,
             n,

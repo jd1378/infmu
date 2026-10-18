@@ -42,16 +42,16 @@ files. The same seed plays the same endless song for anyone, so a song is shared
   a style in a row never share one. In trance, acid, synthwave, downtempo, cinematic and post-rock, about half the
   pieces in 4/4 invent a groove of their own instead, from the genre's grammar: four on the floor, the backbeat or the
   half-time snare kept, the kick's syncopations, ghost notes, hats, fill and bass drawn afresh.
-- **Played, not sequenced.** What a person would play is performed: a melody swells through its phrase and breathes at
-  its end, each player drifts a little around the beat, chords are rolled, and the band plays softer under the melody
-  and swells into a bigger part. A returning melody gets a grace note here and there; winds and brass shade every note
-  with its own vibrato and swell into long ones; a sax or flute player's breath swells and eases, changes notes without
-  stopping the air, lets a phrase's last note go, breathes in the rests and, when a line runs on too long, cuts a note
-  short to snatch a breath; guitarists hammer on, slide and squeak; a slow piece is pedalled, its undamped strings
-  ringing along. The band styles have a drummer with a feel of their own (a lazy backbeat, cymbals pushing ahead), ghost
-  notes far under the backbeat, flams and fills that change from phrase to phrase, and a different take of the drum on
-  every stroke. Their tempo breathes: the band pushes into its peak, calm phrases press on and relax, and a piece slows
-  into its last chord. Drum machines and sequencers keep their exact grid.
+- **Played, not sequenced, and in time.** What a person would play is performed in its dynamics and lengths, while every
+  note stays on the beat: a melody swells through its phrase and breathes at its end, and the band plays softer under
+  the melody and swells into a bigger part. A returning melody gets a grace note here and there; winds and brass shade
+  every note with its own vibrato and swell into long ones; a sax or flute player's breath swells and eases, changes
+  notes without stopping the air, lets a phrase's last note go, breathes in the rests and, when a line runs on too long,
+  cuts a note short to snatch a breath; guitarists hammer on, slide and squeak; a slow piece is pedalled, its undamped
+  strings ringing along. The band styles have a drummer: ghost notes far under the backbeat, a swell into each new
+  phrase, and a different take of the drum on every stroke. Their tempo breathes, the whole band together: it pushes
+  into its peak, calm phrases press on and relax, and a piece slows into its last chord. Drum machines and sequencers
+  keep a steady tempo.
 - **Pieces that build.** A movement follows its arc: in the classic climb it starts quiet, every return is bigger,
   breaks fall back, and the last chorus or drop is the peak. A returning part grows by one thing at a time (a
   counter-line answering the hook, a layer in the groove, the colour joining) and the peak doubles the hook. Loudness

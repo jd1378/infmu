@@ -1,8 +1,8 @@
 // A guitarist's hands. Players are told apart by a few habits more than by their notes: how wide and how fast they
 // shake a held note (a quick narrow flutter, a slow wide one), whether they pick every note or hammer and pull a run
 // off one pick, whether they slide into notes, bend up to them, or wear a bottleneck and glide from note to note on
-// one pick, whether they sit behind the beat or push it. Each piece's lead guitarist has one set of these habits,
-// heard in every line they play, and tunes the guitar their way: which open strings ring on through the chords.
+// one pick. Each piece's lead guitarist has one set of these habits, heard in every line they play, and tunes the
+// guitar their way: which open strings ring on through the chords.
 
 import { MODES } from '../theory.ts';
 import type { Ctx } from './context.ts';
@@ -24,8 +24,6 @@ export interface Hands {
   readonly glide: number;
   /** A held note: picked on the scale's note below and bent up to it (not on an acoustic's heavy strings). */
   readonly bend: number;
-  /** Seconds the tune sits behind the beat (ahead if negative). */
-  readonly lag: number;
   /** Tremolo-picked in 32nds rather than 16ths. */
   readonly fast: boolean;
 }
@@ -39,15 +37,14 @@ export const ANYONE: Hands = {
   slide: 0.3,
   glide: 1,
   bend: 0,
-  lag: 0,
   fast: false,
 };
 
 export const PLAYERS: Record<Player, Hands> = {
-  // sings each long note: bends up to it and shakes it slowly and wide, behind the beat
-  singer: { vib: 1.5, rate: 4.4, slur: 0.3, legato: 0.1, slide: 0.15, glide: 1, bend: 0.3, lag: 0.018, fast: false },
+  // sings each long note: bends up to it and shakes it slowly and wide
+  singer: { vib: 1.5, rate: 4.4, slur: 0.3, legato: 0.1, slide: 0.15, glide: 1, bend: 0.3, fast: false },
   // a quick narrow flutter, runs hammered and pulled off, bends
-  blues: { vib: 1.1, rate: 6.3, slur: 0.65, legato: 0.15, slide: 0.3, glide: 1, bend: 0.25, lag: 0.01, fast: false },
+  blues: { vib: 1.1, rate: 6.3, slur: 0.65, legato: 0.15, slide: 0.3, glide: 1, bend: 0.25, fast: false },
   // barely picks: hammers, pulls off and slides from note to note
   legato: {
     vib: 0.9,
@@ -57,16 +54,15 @@ export const PLAYERS: Record<Player, Hands> = {
     slide: 0.4,
     glide: 1.4,
     bend: 0.05,
-    lag: 0.004,
     fast: false,
   },
-  // picks every note cleanly and leaves it to the delay, barely shaken, on the beat
-  plain: { vib: 0.35, rate: 5.3, slur: 0.1, legato: 0, slide: 0.03, glide: 1, bend: 0, lag: 0, fast: false },
-  // quick and bright: tremolo in 32nds, a quick narrow vibrato, a hair ahead of the beat
-  tremolo: { vib: 0.7, rate: 5.9, slur: 0.4, legato: 0.1, slide: 0.1, glide: 1, bend: 0.05, lag: -0.006, fast: true },
+  // picks every note cleanly and leaves it to the delay, barely shaken
+  plain: { vib: 0.35, rate: 5.3, slur: 0.1, legato: 0, slide: 0.03, glide: 1, bend: 0, fast: false },
+  // quick and bright: tremolo in 32nds, a quick narrow vibrato
+  tremolo: { vib: 0.7, rate: 5.9, slur: 0.4, legato: 0.1, slide: 0.1, glide: 1, bend: 0.05, fast: true },
   // a slide on one finger: no frets, so nothing is hammered; it glides from note to note on one pick and scoops up
   // into the notes it picks, with a wide even vibrato
-  bottleneck: { vib: 1.6, rate: 5.8, slur: 0, legato: 0.8, slide: 0.5, glide: 3, bend: 0, lag: 0.012, fast: false },
+  bottleneck: { vib: 1.6, rate: 5.8, slur: 0, legato: 0.8, slide: 0.5, glide: 3, bend: 0, fast: false },
 };
 
 /**

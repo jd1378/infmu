@@ -468,21 +468,19 @@ Deno.test('a movement opens quietly: no hit or bell on its first beat', () => {
   assert(landings > 0, 'no swell hand-over found');
 });
 
-Deno.test('played parts are performed; the kick, the synth bass and the arpeggiator keep the grid', () => {
+Deno.test('every part keeps the grid; the played parts are shaded in their dynamics', () => {
   const song = new Song('performance', ['pulse']);
   const mv = song.movement(0);
   const k = mv.sections.findIndex((s) => s.role === 'chorus');
   const s = composeSection(song, mv.firstSection + k);
   const s16 = 60 / s.bpm / 4;
-  // swing moves odd 16ths on purpose: measure against even 16ths (8ths) only
-  const onGrid = (t: number) => Math.abs(t / (2 * s16) - Math.round(t / (2 * s16))) * 2 * s16 < 1e-6;
-  const onsets = (f: (e: Ev) => boolean) =>
-    s.events.filter(f).flatMap((e) => ('ns' in e ? e.ns.map((n) => n.t) : [e.t]));
-  const played = onsets((e) => ['string', 'piano', 'mallet', 'lead', 'wind'].includes(e.i));
-  assert(played.length > 0 && played.filter(onGrid).length < played.length * 0.2, 'played parts are machine-exact');
-  // synthwave's bass is a synth, sequenced like its arpeggios
-  const tight = onsets((e) => e.i === 'kick' || e.i === 'bass' || e.i === 'pluck');
-  assert(tight.length > 0 && tight.every((t) => onGrid(t) || onGrid(t + s16)), 'a sequenced part drifted');
+  const onGrid = (t: number) => Math.abs(t / s16 - Math.round(t / s16)) * s16 < 1e-6;
+  const notes = s.events.flatMap((e) =>
+    'ns' in e ? e.ns.map((n) => ({ t: n.t, d: n.d })) : [{ t: e.t, d: 'd' in e ? Number(e.d) : 0 }]
+  );
+  // a grace note is the one thing off the grid: a short note ending on its note
+  const off = notes.filter((n) => !onGrid(n.t) && !(n.d <= 0.081 && onGrid(n.t + n.d)));
+  assertEquals(off.length, 0, `${off.length} of ${notes.length} notes off the grid`);
   const velocities = new Set(
     s.events.filter((e) => ['string', 'piano', 'mallet'].includes(e.i)).map((e) => (e as { v: number }).v.toFixed(3)),
   );
@@ -539,14 +537,14 @@ Deno.test('takes of a stroke differ, a take is the same every time, and a softer
   assert(soft < hard * 0.8, `a ghost note is as bright as a backbeat (${soft.toFixed(3)} vs ${hard.toFixed(3)})`);
 });
 
-Deno.test('a drummer plays ghost notes well under the backbeat, and each limb where the feel puts it', () => {
+Deno.test('a drummer plays ghost notes well under the backbeat, every stroke on the beat', () => {
   // lo-fi's grooves are full of ghost notes
   const snares = [0, 1, 2, 3].flatMap((k) => sectionsOf(`feel-haze-${k}`, 'haze'))
     .flatMap((s) => s.events.filter((e) => e.i === 'snare').map((e) => e.v))
     .sort((a, b) => a - b);
   const ghost = snares[Math.floor(snares.length * 0.1)] / snares[Math.floor(snares.length * 0.9)];
   assert(ghost < 0.3, `ghost notes are ${ghost.toFixed(2)} of the backbeat`);
-  // downtempo's shaker drives ahead of the kick and its backbeat leans back
+  // downtempo's drummer: kick, hats and backbeat exactly on the (swung) grid
   const song = new Song('feel-garden', ['garden']);
   const mv = song.movement(0);
   const sections = mv.sections.map((_, k) => composeSection(song, mv.firstSection + k));
@@ -563,15 +561,10 @@ Deno.test('a drummer plays ghost notes well under the backbeat, and each limb wh
         return t - swung(step);
       });
     });
-  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-  const kick = mean(offsets((e) => e.i === 'kick'));
-  const hats = mean(offsets((e) => e.i === 'hat'));
-  // the backbeat itself: not a flam's grace stroke just before another snare
-  const flam = (e: Ev) =>
-    sections.some((x) => x.events.some((o) => o.i === 'snare' && o.t - e.t > 0.012 && o.t - e.t < 0.035));
-  const backbeat = mean(offsets((e) => e.i === 'snare' && !flam(e)));
-  assert(hats < kick - 0.002, `hats ${((hats - kick) * 1000).toFixed(1)} ms from the kick`);
-  assert(backbeat > kick + 0.003, `backbeat ${((backbeat - kick) * 1000).toFixed(1)} ms from the kick`);
+  for (const drum of ['kick', 'hat', 'snare', 'perc'] as const) {
+    const worst = Math.max(...offsets((e) => e.i === drum).map(Math.abs));
+    assert(worst < 0.0005, `a ${drum} ${(worst * 1000).toFixed(1)} ms off the beat`);
+  }
 });
 
 Deno.test("a sequencer's tempo never moves", () => {
@@ -702,7 +695,7 @@ Deno.test('a slow piece is pedalled: the left hand rings to the next chord; a gr
   assert(held('haze') < 0.5, "lo-fi's comping is pedalled");
 });
 
-Deno.test('a guitarist hammers on, slides and squeaks; flams and fills vary on a drummed kit', () => {
+Deno.test('a guitarist hammers on, slides and squeaks; a drummer never flams', () => {
   const all = ['ember', 'haze', 'garden'].flatMap((style) =>
     [0, 1, 2].flatMap((k) => sectionsOf(`fret-${style}-${k}`, style as StyleId))
   );
@@ -712,29 +705,10 @@ Deno.test('a guitarist hammers on, slides and squeaks; flams and fills vary on a
   // a flam: a soft stroke of the same drum 18 to 30 ms before a loud one
   const flams = (sections: ReturnType<typeof composeSection>[]) =>
     sections.flatMap((s) => {
-      const sn = s.events.filter((e) => e.i === 'snare') as { t: number; v: number }[];
+      const sn = s.events.filter((e) => e.i === 'snare' || e.i === 'tom') as { t: number; v: number }[];
       return sn.filter((a) => sn.some((b) => b.t - a.t > 0.017 && b.t - a.t < 0.031 && a.v < b.v * 0.5));
     }).length;
-  assert(flams(sectionsOf('flams', 'ember')) > 0);
-  assertEquals(flams(sectionsOf('flams', 'rise')), 0);
-  // the fills of a drummed movement are not all the same
-  const song = new Song('fills', ['ember']);
-  const mv = song.movement(0);
-  const s16 = 60 / mv.bpm / 4;
-  const fills = new Set<string>();
-  mv.sections.forEach((sec, k) => {
-    if (sec.role !== 'chorus' && sec.role !== 'drop' && sec.role !== 'verse') return;
-    const s = composeSection(song, mv.firstSection + k);
-    const clock = new Clock(mv, k);
-    const ctx = new Ctx(song, mv.firstSection + k);
-    for (let b = 0; b < sec.bars; b++) {
-      if (ctx.runBar(b) % 8 !== 7) continue;
-      const steps = s.events.filter((e) => (e.i === 'snare' || e.i === 'tom') && (e as { v: number }).v > 0.2)
-        .map((e) => Math.round(clock.written(e.t) / s16) - b * 16).filter((x) => x >= 0 && x < 16);
-      fills.add([...new Set(steps)].sort((x, y) => x - y).join(','));
-    }
-  });
-  assert(fills.size > 1, `every fill is ${[...fills][0]}`);
+  assertEquals(flams(sectionsOf('flams', 'ember')), 0);
 });
 
 Deno.test('a slide glides onto its note; a long wind note swells', () => {
@@ -782,7 +756,7 @@ Deno.test('a slide glides onto its note; a long wind note swells', () => {
   assert(Math.sqrt(late / early) > 1.1, 'a long note stays flat');
 });
 
-Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and the left hand leans on its bass", () => {
+Deno.test("a pianist's phrase breathes, the tune sounds with its chords, and the left hand leans on its bass", () => {
   const song = new Song('pianist', ['nocturne']);
   const mv = song.movement(0);
   const k = mv.sections.findIndex((s) => s.role === 'bridge' || s.role === 'intro');
@@ -802,10 +776,7 @@ Deno.test("a pianist's phrase breathes, the tune sounds ahead of the chords, and
     return near.length ? [m.t - Math.min(...near.map((c) => c.t))] : [];
   });
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-  assert(
-    leads.length > 3 && mean(leads) < -0.01,
-    `the tune leads the chords by ${(-mean(leads) * 1000).toFixed(0)} ms`,
-  );
+  assert(leads.length > 3 && Math.max(...leads.map(Math.abs)) < 1e-6, 'the tune came apart from its chords');
   const bar = barSeconds(mv);
   const down = chords.filter((e) => {
     const w = clock.written(e.t) / bar;

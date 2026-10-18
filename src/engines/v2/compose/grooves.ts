@@ -16,7 +16,6 @@ import {
   type PercBar,
   percBar,
 } from './parts.ts';
-import { drummed } from './perform.ts';
 import { INVENTED, inventGroove, INVENTS } from './invent.ts';
 
 /** Pitched drums, taiko or toms: `lo` on the tonic (octave 2), `mid` a fifth above it, `hi` an octave above it. */
@@ -51,8 +50,6 @@ export interface Groove {
   bassAnswer?: readonly BassHit[];
   /** Bass sound for full sections, when not the style's usual one. */
   bassKind?: BassKind;
-  /** Snare, clap and rim this fraction of a 16th behind the grid: the lazy backbeat (`drums()` must apply it). */
-  lag?: number;
 }
 
 export type Weighted<T> = readonly (readonly [T, number])[];
@@ -81,7 +78,7 @@ export function grooveBass(g: Groove, full: boolean, runBar: number, fill: boole
 export function grooveBar(ctx: Ctx, bar: number, p: GrooveBar, kit: DrumKit, gain = 1, perc = 0.6): void {
   drums(ctx, bar, p, kit, gain);
   percBar(ctx, bar, p, gain * perc, kit.acoustic);
-  const t = (s: number) => Math.max(0, ctx.barAt(bar, s) + ctx.rng.jitter(0.005));
+  const t = (s: number) => ctx.barAt(bar, s);
   const lo = ctx.tonicLow + 12;
   for (const [pat, n] of [[p.lo, lo], [p.mid, lo + 7], [p.hi, lo + 12]] as const) {
     if (pat) {
@@ -97,7 +94,7 @@ export function grooveBar(ctx: Ctx, bar: number, p: GrooveBar, kit: DrumKit, gai
 /**
  * The movement's groove, drawn once from its style's bank. A piece right after one of the same style draws
  * again until it differs, so two in a row never share a beat. About half the 4/4 pieces of a style that invents
- * (see invent.ts) play a groove of their own instead, keeping the drawn one's kit, feel and acid line.
+ * (see invent.ts) play a groove of their own instead, keeping the drawn one's kit and acid line.
  */
 export function grooveFor<G extends Groove>(ctx: Ctx, bank: Weighted<G>): G {
   const draw = (seed: number, k: number) => new Rng(hash32(seed, 0x6d6f74)).fork('groove', k).weighted(bank);
@@ -136,56 +133,6 @@ export interface GroovePlay {
   withBass?: boolean;
 }
 
-/** Styles whose drummer fills round the toms. */
-const TOMS: ReadonlySet<string> = new Set(['ember', 'cathedral']);
-
-/**
- * A drummer's fill is never quite the same twice: as written, or started half-way through the bar, or with a
- * pickup of ghost notes into the downbeat, or (on a kit with toms) its last beat taken round the toms. A drum
- * machine plays its programmed fill every time.
- */
-function fillOf(ctx: Ctx, g: Groove, full: boolean, rb: number, layer: boolean): GrooveBar {
-  const written = grooveLanes(g, full, rb, layer, true);
-  if (!drummed(ctx.mv.style)) return written;
-  const rng = new Rng(hash32(ctx.mv.seed, ctx.local, rb, 0x66696c));
-  const ways: [string, number][] = [['written', 3], ['late', 2], ['pickup', 2]];
-  if (TOMS.has(ctx.mv.style)) ways.push(['toms', 2]);
-  const base = grooveLanes(g, full, rb, layer, false);
-  const out: GrooveBar = { ...written };
-  const lanes = Object.keys(g.fill) as (keyof GrooveBar)[];
-  const spb = ctx.spb;
-  const rest = '.'.repeat(spb);
-  switch (rng.weighted(ways)) {
-    case 'late':
-      for (const k of lanes) out[k] = (base[k] ?? rest).slice(0, spb / 2) + (written[k] ?? '').slice(spb / 2);
-      break;
-    case 'pickup': {
-      const sn = [...(written.snare ?? rest)];
-      for (let s = spb - 4; s < spb; s++) if (sn[s] === '.') sn[s] = '-';
-      out.snare = sn.join('');
-      break;
-    }
-    case 'toms': {
-      const sn = [...(written.snare ?? rest)];
-      const toms = { hi: [...rest], mid: [...rest], lo: [...rest] };
-      const order = ['hi', 'hi', 'mid', 'lo'] as const;
-      let k = 0;
-      for (let s = spb - 4; s < spb; s++) {
-        if (sn[s] === '.') continue;
-        toms[order[Math.min(3, k++)]][s] = sn[s];
-        sn[s] = '.';
-      }
-      if (!k) break;
-      out.snare = sn.join('');
-      out.hi = toms.hi.join('');
-      out.mid = toms.mid.join('');
-      out.lo = toms.lo.join('');
-      break;
-    }
-  }
-  return out;
-}
-
 const CALM: ReadonlySet<Role> = new Set(['intro', 'verse', 'prechorus', 'break', 'bridge', 'outro']);
 
 /** A bar's hats and shakers on the eighths only. */
@@ -209,10 +156,10 @@ export function playGroove(ctx: Ctx, g: Groove, b: number, o: GroovePlay): void 
   const full = ctx.role === 'chorus' || ctx.role === 'drop' || ctx.role === 'solo';
   const layer = ctx.role !== 'solo' && (ctx.returning || rb >= 8);
   const fill = rb % 8 === 7 && (full || ctx.role === 'verse');
-  const kit = { ...o.kit, ...g.kit, lag: g.lag };
+  const kit = { ...o.kit, ...g.kit };
   // a still piece's drums sit out its calm parts (they come in with its builds); a flowing one's hats and shakers
   // play eighths
-  const lanes = fill ? fillOf(ctx, g, full, rb, layer) : grooveLanes(g, full, rb, layer, false);
+  const lanes = grooveLanes(g, full, rb, layer, fill);
   const motion = motionOf(ctx);
   if (motion !== 'still' || !CALM.has(ctx.role)) {
     grooveBar(ctx, b, motion === 'flowing' ? eighths(lanes) : lanes, kit, o.gain ?? 1, o.perc ?? 0.6);
@@ -643,7 +590,6 @@ export const HAZE: Weighted<Groove> = [
     bassLight: [[0, 6, 0, 1], [6, 4, 7, 0.8], [10, 4, 0, 0.85], [14, 2, 'A', 0.7]],
     bassFull: [[0, 2, 0, 1], [2, 4, 12, 0.7], [6, 4, 7, 0.85], [10, 4, 0, 0.9], [14, 2, 'A', 0.75]],
     bassAnswer: [[0, 2, 0, 1], [2, 4, 12, 0.7], [6, 4, 7, 0.85], [10, 3, 0, 0.9], [13, 3, 'A', 0.8]],
-    lag: 0.1,
   }, 3],
   [{
     name: 'dilla lean',
@@ -655,7 +601,6 @@ export const HAZE: Weighted<Groove> = [
     bassLight: [[0, 7, 0, 1], [7, 2, 0, 0.85], [9, 5, 7, 0.8], [14, 2, 'A', 0.7]],
     bassFull: [[0, 5, 0, 1], [5, 2, 12, 0.6], [7, 2, 0, 0.9], [9, 5, 7, 0.85], [14, 2, 'A', 0.75]],
     bassAnswer: [[0, 2, 0, 1], [2, 5, 0, 0.7], [7, 2, 0, 0.9], [9, 5, 7, 0.85], [14, 2, 'A', 0.75]],
-    lag: 0.18,
   }, 2],
   [{
     name: 'jazzhop ride',
@@ -665,7 +610,6 @@ export const HAZE: Weighted<Groove> = [
     layer: { congaHi: '..-...-...-...o.' },
     bassLight: [[0, 4, 0, 1], [4, 4, 7, 0.75], [8, 2, 12, 0.8], [10, 4, 7, 0.85], [14, 2, 'A', 0.75]],
     bassFull: [[0, 4, 0, 1], [4, 2, 7, 0.75], [6, 2, 12, 0.7], [8, 2, 7, 0.8], [10, 3, 0, 0.9], [13, 3, 'A', 0.8]],
-    lag: 0.12,
   }, 2],
   [{
     name: 'sleepy half-time',
@@ -677,7 +621,6 @@ export const HAZE: Weighted<Groove> = [
     bassLight: [[0, 10, 0, 1], [10, 4, 0, 0.85], [14, 2, 'A', 0.7]],
     bassFull: [[0, 10, 0, 1], [10, 4, 12, 0.8], [14, 2, 'A', 0.7]],
     bassKind: '808',
-    lag: 0.15,
   }, 2],
   [{
     name: 'chillhop bounce',
@@ -687,7 +630,6 @@ export const HAZE: Weighted<Groove> = [
     layer: { shaker: '-o-o-o-o-o-o-o-o' },
     bassLight: [[0, 3, 0, 1], [3, 7, 0, 0.8], [10, 3, 0, 0.9], [13, 3, 'A', 0.75]],
     bassFull: [[0, 3, 0, 1], [3, 3, 12, 0.7], [6, 4, 7, 0.8], [10, 3, 0, 0.9], [13, 3, 'A', 0.8]],
-    lag: 0.08,
   }, 2],
   [{
     name: 'bossa-hop',

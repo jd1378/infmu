@@ -109,7 +109,7 @@ export function haze(ctx: Ctx): void {
       for (let b = 0; b < bars; b++) {
         if (b < last) playGroove(ctx, g, b, { ...band, gain: 0.85, bassGain: 0.8 });
         else {
-          drums(ctx, b, { hat, snare: '....x...x.x.xxxx' }, { ...kit, lag: g.lag }, 0.85);
+          drums(ctx, b, { hat, snare: '....x...x.x.xxxx' }, kit, 0.85);
           bassFigure(ctx, b, g.bassFull, bassKind, 0.8);
         }
         keys(b, chorusComp, 0.65);
